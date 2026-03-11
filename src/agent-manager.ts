@@ -6,8 +6,6 @@
  * Foreground agents bypass the queue (they block the parent anyway).
  */
 
-import { randomUUID } from "node:crypto";
-
 import type { Model } from "@mariozechner/pi-ai";
 import type {
   AgentSession,
@@ -83,6 +81,7 @@ export class AgentManager {
   private onStart?: OnAgentStart;
   private maxConcurrent: number;
   private cleanupTimeoutMs: number;
+  private nextId = 1;
 
   /** Queue of background agents waiting to start. */
   private queue: { id: string; args: SpawnArgs }[] = [];
@@ -137,7 +136,7 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions
   ): string {
-    const id = randomUUID().slice(0, 17);
+    const id = String(this.nextId++);
     const abortController = new AbortController();
 
     // Forward parent signal (e.g. pi's Esc key) to abort the agent
