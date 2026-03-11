@@ -1496,10 +1496,12 @@ Guidelines:
       }
 
       // Wait for completion if requested.
-      // Pre-mark resultConsumed BEFORE awaiting: onComplete fires inside .then()
-      // (attached earlier at spawn time) and always runs before this await resumes.
-      // Setting the flag here prevents a redundant follow-up notification.
-      if (params.wait && record.status === "running" && record.promise) {
+      // Pre-mark resultConsumed BEFORE awaiting to suppress duplicate completion nudge.
+      if (
+        params.wait &&
+        (record.status === "running" || record.status === "queued") &&
+        record.promise
+      ) {
         record.resultConsumed = true;
         cancelNudge(params.agent_id);
         await record.promise;
