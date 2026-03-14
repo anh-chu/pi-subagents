@@ -8,7 +8,7 @@ const QUERY_SPLIT_RE = /[\s\-/]+/;
 
 export interface ModelEntry {
   id: string;
-  name: string;
+  name?: string;
   provider: string;
 }
 
@@ -55,7 +55,7 @@ export function resolveModel(
 
   for (const m of all) {
     const id = m.id.toLowerCase();
-    const name = m.name.toLowerCase();
+    const name = (m.name ?? "").toLowerCase();
     const full = `${m.provider}/${m.id}`.toLowerCase();
 
     let score = 0;
