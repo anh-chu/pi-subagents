@@ -2,107 +2,52 @@
  * agent-runner.ts — Core execution engine: creates sessions, runs agents, collects results.
  */
 
-import type { Api, Model } from "@mariozechner/pi-ai";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
-  type AgentSession,
-  type AgentSessionEvent,
   createAgentSession,
   DefaultResourceLoader,
-  type ExtensionAPI,
-  getAgentDir,
   SessionManager,
   SettingsManager,
-  type ToolDefinition,
+  type AgentSession,
+  type AgentSessionEvent,
+  type ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { Model } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-
-import {
-  getAgentConfig,
-  getConfig,
-  getMemoryTools,
-  getReadOnlyMemoryTools,
-  getToolsForType,
-} from "./agent-types.js";
+import { getToolsForType, getConfig, getAgentConfig } from "./agent-types.js";
+import { buildAgentPrompt } from "./prompts.js";
 import { buildParentContext, extractText } from "./context.js";
 import { detectEnv } from "./env.js";
-import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
-import { DEFAULT_PARENT_SESSION_ID, parentBridge } from "./parent-bridge.js";
-import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
-import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES = [
-  "Agent",
-  "get_subagent_result",
-  "steer_subagent",
-  "reply_to_subagent",
-  "get_subagent_message",
-];
+const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"];
 
-const NOOP = () => {
-  /* noop */
-};
+/** Default max turns to prevent subagents from looping indefinitely. */
+let defaultMaxTurns = 50;
 
-function sdkExpectsToolAllowlist(): boolean {
-  return SettingsManager.create.length >= 1;
-}
-
-interface ToolCallContentBlock {
-  type: "toolCall";
-  name?: string;
-  toolName?: string;
-}
-
-function getToolCallName(content: ToolCallContentBlock): string {
-  return content.name ?? content.toolName ?? "unknown";
-}
-
-/** Default max turns. undefined = unlimited (no turn limit). */
-let defaultMaxTurns: number | undefined;
-
-/** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
-export function normalizeMaxTurns(n: number | undefined): number | undefined {
-  if (n == null || n === 0) {
-    return undefined;
-  }
-  return Math.max(1, n);
-}
-
-/** Get the default max turns value. undefined = unlimited. */
-export function getDefaultMaxTurns(): number | undefined {
-  return defaultMaxTurns;
-}
-/** Set the default max turns value. undefined or 0 = unlimited, otherwise minimum 1. */
-export function setDefaultMaxTurns(n: number | undefined): void {
-  defaultMaxTurns = normalizeMaxTurns(n);
-}
+/** Get the default max turns value. */
+export function getDefaultMaxTurns(): number { return defaultMaxTurns; }
+/** Set the default max turns value (minimum 1). */
+export function setDefaultMaxTurns(n: number): void { defaultMaxTurns = Math.max(1, n); }
 
 /** Additional turns allowed after the soft limit steer message. */
 let graceTurns = 5;
 
 /** Get the grace turns value. */
-export function getGraceTurns(): number {
-  return graceTurns;
-}
+export function getGraceTurns(): number { return graceTurns; }
 /** Set the grace turns value (minimum 1). */
-export function setGraceTurns(n: number): void {
-  graceTurns = Math.max(1, n);
-}
+export function setGraceTurns(n: number): void { graceTurns = Math.max(1, n); }
 
 /**
  * Try to find the right model for an agent type.
  * Priority: explicit option > config.model > parent model.
  */
 function resolveDefaultModel(
-  parentModel: Model<Api> | undefined,
-  registry: {
-    find(provider: string, modelId: string): Model<Api> | undefined;
-    getAvailable?(): Model<Api>[];
-  },
-  configModel?: string
-): Model<Api> | undefined {
+  parentModel: Model<any> | undefined,
+  registry: { find(provider: string, modelId: string): Model<any> | undefined; getAvailable?(): Model<any>[] },
+  configModel?: string,
+): Model<any> | undefined {
   if (configModel) {
     const slashIdx = configModel.indexOf("/");
     if (slashIdx !== -1) {
@@ -112,15 +57,13 @@ function resolveDefaultModel(
       // Build a set of available model keys for fast lookup
       const available = registry.getAvailable?.();
       const availableKeys = available
-        ? new Set(available.map((m) => `${m.provider}/${m.id}`))
+        ? new Set(available.map((m: any) => `${m.provider}/${m.id}`))
         : undefined;
       const isAvailable = (p: string, id: string) =>
         !availableKeys || availableKeys.has(`${p}/${id}`);
 
       const found = registry.find(provider, modelId);
-      if (found && isAvailable(provider, modelId)) {
-        return found;
-      }
+      if (found && isAvailable(provider, modelId)) return found;
     }
   }
 
@@ -136,27 +79,26 @@ export interface ToolActivity {
 export interface RunOptions {
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
-  /** Stable runtime ID for parent bridge routing. */
-  agentId?: string;
-  /** Parent session affinity for bridge delivery. */
-  parentSessionId?: string;
-  /** Whether the subagent may block on ask_parent. */
-  allowAskParent?: boolean;
-  model?: Model<Api>;
+  model?: Model<any>;
   maxTurns?: number;
   signal?: AbortSignal;
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
-  /** Override working directory (e.g. for worktree isolation). */
-  cwd?: string;
   /** Called on tool start/end with activity info. */
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
+  /** Called at the end of each agentic turn with (currentTurn, maxTurns). */
+  onTurnEnd?: (turn: number, maxTurns: number) => void;
   onSessionCreated?: (session: AgentSession) => void;
-  /** Called at the end of each agentic turn with the cumulative count. */
-  onTurnEnd?: (turnCount: number) => void;
+  /** Agent ID — enables send_message tool when set. */
+  agentId?: string;
+  /** Agent description — used in send_message attribution. */
+  agentDescription?: string;
+  /** If provided, send_message checks this before delivering. Suppresses stale
+   *  messages when the parent has already consumed results via get_subagent_result. */
+  isResultConsumed?: () => boolean;
 }
 
 export interface RunResult {
@@ -178,343 +120,149 @@ function collectResponseText(session: AgentSession) {
     if (event.type === "message_start") {
       text = "";
     }
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
-    ) {
+    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       text += event.assistantMessageEvent.delta;
     }
   });
   return { getText: () => text, unsubscribe };
 }
 
-/** Get the last assistant text from the completed session history. */
-function getLastAssistantText(session: AgentSession): string {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const msg = session.messages[i];
-    if (msg.role !== "assistant") {
-      continue;
-    }
-    const text = extractText(msg.content).trim();
-    if (text) {
-      return text;
-    }
-  }
-  return "";
-}
-
 /**
  * Wire an AbortSignal to abort a session.
  * Returns a cleanup function to remove the listener.
  */
-function forwardAbortSignal(
-  session: AgentSession,
-  signal?: AbortSignal
-): () => void {
-  if (!signal) {
-    return NOOP;
-  }
+function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
+  if (!signal) return () => {};
   const onAbort = () => session.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);
-}
-
-function createParentBridgeTools(
-  agentId: string,
-  parentSessionId = DEFAULT_PARENT_SESSION_ID,
-  allowAskParent = true
-) {
-  const tools = [
-    {
-      name: "message_parent",
-      label: "Message Parent",
-      description: "Queue a one-way message for the parent agent.",
-      parameters: Type.Object({
-        message: Type.String({
-          description: "The message to send to the parent agent.",
-        }),
-      }),
-      execute(_toolCallId: string, params: unknown) {
-        const { message } = params as { message: string };
-        const queued = parentBridge.messageParent(agentId, message, {
-          sessionId: parentSessionId,
-        });
-        return Promise.resolve({
-          content: [
-            {
-              type: "text" as const,
-              text: `Queued message for parent (${queued.requestId}).`,
-            },
-          ],
-          details: { requestId: queued.requestId },
-        });
-      },
-    },
-  ];
-
-  if (!allowAskParent) {
-    return tools;
-  }
-
-  tools.push({
-    name: "ask_parent",
-    label: "Ask Parent",
-    description: "Ask the parent agent a question and wait for a reply.",
-    parameters: Type.Object({
-      message: Type.String({
-        description: "The question or request for the parent agent.",
-      }),
-      timeout_ms: Type.Optional(
-        Type.Number({
-          description:
-            "Optional timeout in milliseconds while waiting for the parent reply.",
-          minimum: 1,
-        })
-      ),
-    }),
-    async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
-      const { message, timeout_ms } = params as {
-        message: string;
-        timeout_ms?: number;
-      };
-      const reply = await parentBridge.askParent(agentId, message, {
-        sessionId: parentSessionId,
-        signal,
-        timeoutMs: timeout_ms,
-      });
-      return {
-        content: [{ type: "text" as const, text: reply.text }],
-        details: { requestId: reply.requestId },
-      };
-    },
-  });
-
-  return tools;
 }
 
 export async function runAgent(
   ctx: ExtensionContext,
   type: SubagentType,
   prompt: string,
-  options: RunOptions
+  options: RunOptions,
 ): Promise<RunResult> {
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
-
-  // Resolve working directory: worktree override > parent cwd > process cwd
-  const effectiveCwd = options.cwd ?? ctx.cwd ?? process.cwd();
-
-  const env = await detectEnv(options.pi, effectiveCwd);
+  const env = await detectEnv(options.pi, ctx.cwd);
 
   // Get parent system prompt for append-mode agents
   const parentSystemPrompt = ctx.getSystemPrompt();
 
-  // Build prompt extras (memory, skill preloading)
-  const extras: PromptExtras = {};
+  // Build system prompt from agent config
+  let systemPrompt: string;
+  if (agentConfig) {
+    systemPrompt = buildAgentPrompt(agentConfig, ctx.cwd, env, parentSystemPrompt);
+  } else {
+    // Unknown type fallback: general-purpose (defensive — unreachable in practice
+    // since index.ts resolves unknown types to "general-purpose" before calling runAgent)
+    systemPrompt = buildAgentPrompt({
+      name: type,
+      description: "General-purpose agent",
+      systemPrompt: "",
+      promptMode: "append",
+      extensions: true,
+      skills: true,
+      inheritContext: false,
+      runInBackground: false,
+      isolated: false,
+    }, ctx.cwd, env, parentSystemPrompt);
+  }
+
+  const tools = getToolsForType(type, ctx.cwd);
+
+  // Build send_message as a custom tool (injected via customTools, not the builtin tools array)
+  const customTools: typeof tools = [];
+  if (options.pi && options.agentId) {
+    const agentId = options.agentId;
+    const agentLabel = `${type} (${options.agentDescription ?? agentId})`;
+
+    customTools.push({
+      name: "send_message",
+      label: "Send Message",
+      description: "Send a fire-and-forget message to the parent agent. " +
+        "No reply comes through this tool — if the parent responds, it arrives as a user message. " +
+        "Use for status updates, early findings, or flagging blockers.",
+      parameters: Type.Object({
+        message: Type.String({ description: "The message to send to the parent." }),
+      }),
+      execute: async (_id: string, params: { message: string }) => {
+        // Skip delivery if the parent already consumed this agent's result —
+        // the message would just be stale noise at that point.
+        if (options.isResultConsumed?.()) {
+          return { content: [{ type: "text" as const, text: "Message suppressed (parent already has results)." }], details: {} };
+        }
+        options.pi.sendUserMessage(
+          `Message from agent ${agentId} (${agentLabel}):\n\n${params.message}`,
+          { deliverAs: "followUp" },
+        );
+        return { content: [{ type: "text" as const, text: "Message sent to parent." }], details: {} };
+      },
+    });
+  }
 
   // Resolve extensions/skills: isolated overrides to false
   const extensions = options.isolated ? false : config.extensions;
   const skills = options.isolated ? false : config.skills;
 
-  // Skill preloading: when skills is string[], preload their content into prompt
-  if (Array.isArray(skills)) {
-    const loaded = preloadSkills(skills, effectiveCwd);
-    if (loaded.length > 0) {
-      extras.skillBlocks = loaded;
-    }
-  }
-
-  type BuiltinSessionTool = ReturnType<typeof getToolsForType>[number];
-
-  let builtinTools: BuiltinSessionTool[] = [
-    ...getToolsForType(type, effectiveCwd),
-  ];
-  const customTools: ToolDefinition[] = options.agentId
-    ? createParentBridgeTools(
-        options.agentId,
-        options.parentSessionId,
-        options.allowAskParent
-      )
-    : [];
-
-  // Persistent memory: detect write capability and branch accordingly.
-  // Account for disallowedTools — a tool in the base set but on the denylist is not truly available.
-  if (agentConfig?.memory) {
-    const existingNames = new Set(builtinTools.map((t) => t.name));
-    const denied = agentConfig.disallowedTools
-      ? new Set(agentConfig.disallowedTools)
-      : undefined;
-    const effectivelyHas = (name: string) =>
-      existingNames.has(name) && !denied?.has(name);
-    const hasWriteTools = effectivelyHas("write") || effectivelyHas("edit");
-
-    if (hasWriteTools) {
-      // Read-write memory: add any missing memory tools (read/write/edit)
-      const memTools = getMemoryTools(effectiveCwd, existingNames);
-      if (memTools.length > 0) {
-        builtinTools = [...builtinTools, ...memTools];
-      }
-      extras.memoryBlock = buildMemoryBlock(
-        agentConfig.name,
-        agentConfig.memory,
-        effectiveCwd
-      );
-    } else {
-      // Read-only memory: only add read tool, use read-only prompt
-      if (!existingNames.has("read")) {
-        const readTools = getReadOnlyMemoryTools(effectiveCwd, existingNames);
-        if (readTools.length > 0) {
-          builtinTools = [...builtinTools, ...readTools];
-        }
-      }
-      extras.memoryBlock = buildReadOnlyMemoryBlock(
-        agentConfig.name,
-        agentConfig.memory,
-        effectiveCwd
-      );
-    }
-  }
-
-  // Build system prompt from agent config
-  let systemPrompt: string;
-  if (agentConfig) {
-    systemPrompt = buildAgentPrompt(
-      agentConfig,
-      effectiveCwd,
-      env,
-      parentSystemPrompt,
-      extras
-    );
-  } else {
-    // Unknown type fallback: general-purpose (defensive — unreachable in practice
-    // since index.ts resolves unknown types to "general-purpose" before calling runAgent)
-    systemPrompt = buildAgentPrompt(
-      {
-        name: type,
-        description: "General-purpose agent",
-        systemPrompt: "",
-        promptMode: "append",
-        extensions: true,
-        skills: true,
-        inheritContext: false,
-        runInBackground: false,
-        isolated: false,
-      },
-      effectiveCwd,
-      env,
-      parentSystemPrompt,
-      extras
-    );
-  }
-
-  // When skills is string[], we've already preloaded them into the prompt.
-  // Still pass noSkills: true since we don't need the skill loader to load them again.
-  const noSkills = skills === false || Array.isArray(skills);
-
   // Load extensions/skills: true or string[] → load; false → don't
-  // Explicit agentDir works around pi 0.68.x DefaultResourceLoader passing an
-  // undefined user-scope base dir into DefaultPackageManager for local packages.
-  const agentDir = getAgentDir();
   const loader = new DefaultResourceLoader({
-    cwd: effectiveCwd,
-    agentDir,
+    cwd: ctx.cwd,
     noExtensions: extensions === false,
-    noSkills,
+    noSkills: skills === false,
     noPromptTemplates: true,
     noThemes: true,
     systemPromptOverride: () => systemPrompt,
-    // Prevent AGENTS.md / CLAUDE.md / APPEND_SYSTEM.md from leaking into
-    // sub-agent prompts. ResourceLoader otherwise re-appends these on top of
-    // the override, breaking `prompt_mode: replace` and `isolated` guarantees.
-    agentsFilesOverride: () => ({ agentsFiles: [] }),
-    appendSystemPromptOverride: () => [],
   });
   await loader.reload();
 
   // Resolve model: explicit option > config.model > parent model
-  const model =
-    options.model ??
-    resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
+  const model = options.model ?? resolveDefaultModel(
+    ctx.model, ctx.modelRegistry, agentConfig?.model,
+  );
 
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;
 
-  const localToolNames = [
-    ...new Set([...builtinTools, ...customTools].map((tool) => tool.name)),
-  ];
-
   const sessionOpts: Record<string, unknown> = {
-    cwd: effectiveCwd,
-    sessionManager: SessionManager.inMemory(effectiveCwd),
-    settingsManager: SettingsManager.create(effectiveCwd),
+    cwd: ctx.cwd,
+    sessionManager: SessionManager.inMemory(ctx.cwd),
+    settingsManager: SettingsManager.create(),
     modelRegistry: ctx.modelRegistry,
     model,
-    customTools: customTools.length > 0 ? customTools : undefined,
+    tools,
+    customTools,
     resourceLoader: loader,
   };
-  sessionOpts.tools = sdkExpectsToolAllowlist() ? localToolNames : builtinTools;
   if (thinkingLevel) {
     sessionOpts.thinkingLevel = thinkingLevel;
   }
 
   // createAgentSession's type signature may not include thinkingLevel yet
-  const { session } = await createAgentSession(
-    sessionOpts as Parameters<typeof createAgentSession>[0]
-  );
-
-  // Build disallowed tools set from agent config
-  const disallowedSet = agentConfig?.disallowedTools
-    ? new Set(agentConfig.disallowedTools)
-    : undefined;
+  const { session } = await createAgentSession(sessionOpts as Parameters<typeof createAgentSession>[0]);
 
   // Filter active tools: remove our own tools to prevent nesting,
-  // apply extension allowlist if specified, and apply disallowedTools denylist
+  // and apply extension allowlist if specified
   if (extensions !== false) {
-    const localToolNameSet = new Set(localToolNames);
+    const builtinToolNames = new Set(tools.map(t => t.name));
     const activeTools = session.getActiveToolNames().filter((t) => {
-      if (EXCLUDED_TOOL_NAMES.includes(t)) {
-        return false;
-      }
-      if (disallowedSet?.has(t)) {
-        return false;
-      }
-      if (localToolNameSet.has(t)) {
-        return true;
-      }
+      if (EXCLUDED_TOOL_NAMES.includes(t)) return false;
+      if (builtinToolNames.has(t)) return true;
       if (Array.isArray(extensions)) {
-        return extensions.some((ext) => t.startsWith(ext) || t.includes(ext));
+        return extensions.some(ext => t.startsWith(ext) || t.includes(ext));
       }
       return true;
     });
     session.setActiveToolsByName(activeTools);
-  } else if (disallowedSet) {
-    // Even with extensions disabled, apply denylist to built-in tools
-    const activeTools = session
-      .getActiveToolNames()
-      .filter((t) => !disallowedSet.has(t));
-    session.setActiveToolsByName(activeTools);
   }
-
-  // Bind extensions so that session_start fires and extensions can initialize
-  // (e.g. loading credentials, setting up state). Placed after tool filtering
-  // so extension-provided skills/prompts from extendResourcesFromExtensions()
-  // respect the active tool set. All ExtensionBindings fields are optional.
-  await session.bindExtensions({
-    onError: (err) => {
-      options.onToolActivity?.({
-        type: "end",
-        toolName: `extension-error:${err.extensionPath}`,
-      });
-    },
-  });
 
   options.onSessionCreated?.(session);
 
   // Track turns for graceful max_turns enforcement
   let turnCount = 0;
-  const maxTurns = normalizeMaxTurns(
-    options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns
-  );
+  const maxTurns = options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns;
   let softLimitReached = false;
   let aborted = false;
 
@@ -522,31 +270,21 @@ export async function runAgent(
   const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "turn_end") {
       turnCount++;
-      options.onTurnEnd?.(turnCount);
-      if (maxTurns != null) {
-        if (!softLimitReached && turnCount >= maxTurns) {
-          softLimitReached = true;
-          session.steer(
-            "You have reached your turn limit. Wrap up immediately — provide your final answer now."
-          );
-        } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
-          aborted = true;
-          session.abort();
-        }
+      options.onTurnEnd?.(turnCount, maxTurns);
+      if (!softLimitReached && turnCount >= maxTurns) {
+        softLimitReached = true;
+        session.steer("You have reached your turn limit. Wrap up immediately — provide your final answer now.");
+      } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
+        aborted = true;
+        session.abort();
       }
     }
     if (event.type === "message_start") {
       currentMessageText = "";
     }
-    if (
-      event.type === "message_update" &&
-      event.assistantMessageEvent.type === "text_delta"
-    ) {
+    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       currentMessageText += event.assistantMessageEvent.delta;
-      options.onTextDelta?.(
-        event.assistantMessageEvent.delta,
-        currentMessageText
-      );
+      options.onTextDelta?.(event.assistantMessageEvent.delta, currentMessageText);
     }
     if (event.type === "tool_execution_start") {
       options.onToolActivity?.({ type: "start", toolName: event.toolName });
@@ -576,9 +314,7 @@ export async function runAgent(
     cleanupAbort();
   }
 
-  const responseText =
-    collector.getText().trim() || getLastAssistantText(session);
-  return { responseText, session, aborted, steered: softLimitReached };
+  return { responseText: collector.getText(), session, aborted, steered: softLimitReached };
 }
 
 /**
@@ -587,24 +323,17 @@ export async function runAgent(
 export async function resumeAgent(
   session: AgentSession,
   prompt: string,
-  options: {
-    onToolActivity?: (activity: ToolActivity) => void;
-    signal?: AbortSignal;
-  } = {}
+  options: { onToolActivity?: (activity: ToolActivity) => void; signal?: AbortSignal } = {},
 ): Promise<string> {
   const collector = collectResponseText(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
 
   const unsubToolUse = options.onToolActivity
     ? session.subscribe((event: AgentSessionEvent) => {
-        if (event.type === "tool_execution_start") {
-          options.onToolActivity!({ type: "start", toolName: event.toolName });
-        }
-        if (event.type === "tool_execution_end") {
-          options.onToolActivity!({ type: "end", toolName: event.toolName });
-        }
+        if (event.type === "tool_execution_start") options.onToolActivity!({ type: "start", toolName: event.toolName });
+        if (event.type === "tool_execution_end") options.onToolActivity!({ type: "end", toolName: event.toolName });
       })
-    : NOOP;
+    : () => {};
 
   try {
     await session.prompt(prompt);
@@ -614,7 +343,7 @@ export async function resumeAgent(
     cleanupAbort();
   }
 
-  return collector.getText().trim() || getLastAssistantText(session);
+  return collector.getText();
 }
 
 /**
@@ -623,7 +352,7 @@ export async function resumeAgent(
  */
 export async function steerAgent(
   session: AgentSession,
-  message: string
+  message: string,
 ): Promise<void> {
   await session.steer(message);
 }
@@ -636,32 +365,22 @@ export function getAgentConversation(session: AgentSession): string {
 
   for (const msg of session.messages) {
     if (msg.role === "user") {
-      const text =
-        typeof msg.content === "string"
-          ? msg.content
-          : extractText(msg.content);
-      if (text.trim()) {
-        parts.push(`[User]: ${text.trim()}`);
-      }
+      const text = typeof msg.content === "string"
+        ? msg.content
+        : extractText(msg.content);
+      if (text.trim()) parts.push(`[User]: ${text.trim()}`);
     } else if (msg.role === "assistant") {
       const textParts: string[] = [];
       const toolCalls: string[] = [];
       for (const c of msg.content) {
-        if (c.type === "text" && c.text) {
-          textParts.push(c.text);
-        } else if (c.type === "toolCall") {
-          toolCalls.push(`  Tool: ${getToolCallName(c)}`);
-        }
+        if (c.type === "text" && c.text) textParts.push(c.text);
+        else if (c.type === "toolCall") toolCalls.push(`  Tool: ${(c as any).toolName ?? "unknown"}`);
       }
-      if (textParts.length > 0) {
-        parts.push(`[Assistant]: ${textParts.join("\n")}`);
-      }
-      if (toolCalls.length > 0) {
-        parts.push(`[Tool Calls]:\n${toolCalls.join("\n")}`);
-      }
+      if (textParts.length > 0) parts.push(`[Assistant]: ${textParts.join("\n")}`);
+      if (toolCalls.length > 0) parts.push(`[Tool Calls]:\n${toolCalls.join("\n")}`);
     } else if (msg.role === "toolResult") {
       const text = extractText(msg.content);
-      const truncated = text.length > 200 ? `${text.slice(0, 200)}...` : text;
+      const truncated = text.length > 200 ? text.slice(0, 200) + "..." : text;
       parts.push(`[Tool Result (${msg.toolName})]: ${truncated}`);
     }
   }
