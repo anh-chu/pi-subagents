@@ -989,10 +989,30 @@ Guidelines:
         ? getDisplayName(args.subagent_type)
         : "Agent";
       const desc = args.description ?? "";
+      const tags: string[] = [];
+      if (args.model) {
+        tags.push(args.model);
+      }
+      if (args.run_in_background) {
+        tags.push("bg");
+      }
+      if (args.max_turns) {
+        tags.push(`max_turns: ${args.max_turns}`);
+      }
+      if (args.thinking_level) {
+        tags.push(`thinking: ${args.thinking_level}`);
+      }
+      const suffix = tags.length
+        ? " · " +
+          tags
+            .map((t) => theme.fg("dim", t))
+            .join(" " + theme.fg("dim", "·") + " ")
+        : "";
       return new Text(
         "▸ " +
           theme.fg("toolTitle", theme.bold(displayName)) +
-          (desc ? "  " + theme.fg("muted", desc) : ""),
+          (desc ? "  " + theme.fg("muted", desc) : "") +
+          suffix,
         0,
         0
       );
@@ -1102,8 +1122,11 @@ Guidelines:
       if (details.status === "error") {
         line +=
           "\n" + theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`);
-      } else {
+      } else if (details.status === "aborted") {
         line += "\n" + theme.fg("warning", "  ⎿  Aborted (max turns exceeded)");
+      } else {
+        line +=
+          "\n" + theme.fg("error", `  ⎿  Failed (status: ${details.status})`);
       }
 
       return new Text(line, 0, 0);
@@ -1111,310 +1134,330 @@ Guidelines:
 
     // ---- Execute ----
 
-    execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+    execute: async (_toolCallId, params, signal, onUpdate, ctx) => {
       // Ensure we have UI context for widget rendering
       widget.setUICtx(ctx.ui as UICtx);
 
-      // Reload custom agents so new .pi/agents/*.md files are picked up without restart
-      reloadCustomAgents();
-
-      const rawType = params.subagent_type as SubagentType;
-      const resolved = resolveType(rawType);
-      const subagentType = resolved ?? "general-purpose";
-      const fellBack = resolved === undefined;
-
-      const displayName = getDisplayName(subagentType);
-
-      // Get agent config (if any)
-      const customConfig = getAgentConfig(subagentType);
-
-      const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
-
-      // Resolve model from agent config first; tool-call params only fill gaps.
-      let model = ctx.model;
-      if (resolvedConfig.modelInput) {
-        const resolved = resolveModel(
-          resolvedConfig.modelInput,
-          ctx.modelRegistry
-        );
-        if (typeof resolved === "string") {
-          if (resolvedConfig.modelFromParams) {
-            return textResult(resolved);
-          }
-          // config-specified: silent fallback to parent
-        } else {
-          model = resolved;
-        }
-      }
-
-      const thinking = resolvedConfig.thinking;
-      const inheritContext = resolvedConfig.inheritContext;
-      const runInBackground = resolvedConfig.runInBackground;
-      const isolated = resolvedConfig.isolated;
-      const isolation = resolvedConfig.isolation;
-
-      // Build display tags for non-default config
-      const effectiveModelId = model?.id;
-      const agentModelName = effectiveModelId
-        ? (model?.name ?? effectiveModelId)
-            .replace(/^Claude\s+/i, "")
-            .toLowerCase()
-        : undefined;
-      const agentTags: string[] = [];
-      const modeLabel = getPromptModeLabel(subagentType);
-      if (modeLabel) {
-        agentTags.push(modeLabel);
-      }
-      if (isolated) {
-        agentTags.push("isolated");
-      }
-      if (isolation === "worktree") {
-        agentTags.push("worktree");
-      }
-      const effectiveMaxTurns = normalizeMaxTurns(
-        resolvedConfig.maxTurns ?? getDefaultMaxTurns()
-      );
-      // Shared base fields for all AgentDetails in this call
-      const detailBase = {
-        displayName,
-        description: params.description,
-        subagentType,
-        modelName: agentModelName,
-        thinkingLevel: thinking,
-        tags: agentTags.length > 0 ? agentTags : undefined,
-      };
-
-      // Resume existing agent
-      if (params.resume) {
-        const existing = manager.getRecord(params.resume);
-        if (!existing) {
-          return textResult(
-            `Agent not found: "${params.resume}". It may have been cleaned up.`
-          );
-        }
-        if (!existing.session) {
-          return textResult(
-            `Agent "${params.resume}" has no active session to resume.`
-          );
-        }
-        const record = await manager.resume(
-          params.resume,
-          params.prompt,
-          signal
-        );
-        if (!record) {
-          return textResult(`Failed to resume agent "${params.resume}".`);
-        }
-        return textResult(
-          record.result?.trim() || record.error?.trim() || "No output.",
-          buildDetails(detailBase, record)
-        );
-      }
-
-      // Background execution
-      if (runInBackground) {
-        const { state: bgState, callbacks: bgCallbacks } =
-          createActivityTracker(effectiveMaxTurns);
-
-        // Wrap onSessionCreated to wire output file streaming.
-        // The callback lazily reads record.outputFile (set right after spawn)
-        // rather than closing over a value that doesn't exist yet.
-        let id: string;
-        const origBgOnSession = bgCallbacks.onSessionCreated;
-        bgCallbacks.onSessionCreated = (session: any) => {
-          origBgOnSession(session);
-          const rec = manager.getRecord(id);
-          if (rec?.outputFile) {
-            rec.outputCleanup = streamToOutputFile(
-              session,
-              rec.outputFile,
-              id,
-              ctx.cwd
-            );
-          }
+      try {
+        return await executeAgent(params, signal, onUpdate, ctx);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const errorDetails: AgentDetails = {
+          displayName: "Agent",
+          description: params.description,
+          subagentType: "general-purpose",
+          toolUses: 0,
+          tokens: "",
+          durationMs: 0,
+          status: "error",
+          error: msg,
         };
-
-        id = manager.spawn(pi, ctx, subagentType, params.prompt, {
-          description: params.description,
-          model,
-          maxTurns: effectiveMaxTurns,
-          isolated,
-          inheritContext,
-          thinkingLevel: thinking,
-          isBackground: true,
-          isolation,
-          ...bgCallbacks,
-        });
-
-        // Set output file + join mode synchronously after spawn, before the
-        // event loop yields — onSessionCreated is async so this is safe.
-        const joinMode = resolveJoinMode(defaultJoinMode, true);
-        const record = manager.getRecord(id);
-        if (record && joinMode) {
-          record.joinMode = joinMode;
-          record.toolCallId = toolCallId;
-          record.outputFile = createOutputFilePath(
-            ctx.cwd,
-            id,
-            ctx.sessionManager.getSessionId()
-          );
-          writeInitialEntry(record.outputFile, id, params.prompt, ctx.cwd);
-        }
-
-        if (joinMode == null || joinMode === "async") {
-          // Foreground/no join mode or explicit async — not part of any batch
-        } else {
-          // smart or group — add to current batch
-          currentBatchAgents.push({ id, joinMode });
-          // Debounce: reset timer on each new agent so parallel tool calls
-          // dispatched across multiple event loop ticks are captured together
-          if (batchFinalizeTimer) {
-            clearTimeout(batchFinalizeTimer);
-          }
-          batchFinalizeTimer = setTimeout(finalizeBatch, 100);
-        }
-
-        agentActivity.set(id, bgState);
-        widget.ensureTimer();
-        widget.update();
-
-        // Emit created event
-        pi.events.emit("subagents:created", {
-          id,
-          type: subagentType,
-          description: params.description,
-          isBackground: true,
-        });
-
-        const isQueued = record?.status === "queued";
-        return textResult(
-          `Agent ${isQueued ? "queued" : "started"} in background.\n` +
-            `Agent ID: ${id}\n` +
-            `Type: ${displayName}\n` +
-            `Description: ${params.description}\n` +
-            (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
-            (isQueued
-              ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n`
-              : "") +
-            "\nYou will be notified when this agent completes.\n" +
-            "Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n" +
-            `Do not duplicate this agent's work.`,
-          {
-            ...detailBase,
-            toolUses: 0,
-            tokens: "",
-            durationMs: 0,
-            status: "background" as const,
-            agentId: id,
-          }
-        );
+        return textResult(`Agent crashed: ${msg}`, errorDetails);
       }
-
-      // Foreground (synchronous) execution — stream progress via onUpdate
-      let spinnerFrame = 0;
-      const startedAt = Date.now();
-      let fgId: string | undefined;
-
-      const streamUpdate = () => {
-        const details: AgentDetails = {
-          ...detailBase,
-          toolUses: fgState.toolUses,
-          tokens: fgState.tokens,
-          turnCount: fgState.turnCount,
-          maxTurns: fgState.maxTurns,
-          durationMs: Date.now() - startedAt,
-          status: "running",
-          activity: describeActivity(fgState.activeTools, fgState.responseText),
-          spinnerFrame: spinnerFrame % SPINNER.length,
-        };
-        onUpdate?.({
-          content: [{ type: "text", text: `${fgState.toolUses} tool uses...` }],
-          details: details as any,
-        });
-      };
-
-      const { state: fgState, callbacks: fgCallbacks } = createActivityTracker(
-        effectiveMaxTurns,
-        streamUpdate
-      );
-
-      // Wire session creation to register in widget
-      const origOnSession = fgCallbacks.onSessionCreated;
-      fgCallbacks.onSessionCreated = (session: any) => {
-        origOnSession(session);
-        for (const a of manager.listAgents()) {
-          if (a.session === session) {
-            fgId = a.id;
-            agentActivity.set(a.id, fgState);
-            widget.ensureTimer();
-            break;
-          }
-        }
-      };
-
-      // Animate spinner at ~80ms (smooth rotation through 10 braille frames)
-      const spinnerInterval = setInterval(() => {
-        spinnerFrame++;
-        streamUpdate();
-      }, 80);
-
-      streamUpdate();
-
-      const record = await manager.spawnAndWait(
-        pi,
-        ctx,
-        subagentType,
-        params.prompt,
-        {
-          description: params.description,
-          model,
-          maxTurns: effectiveMaxTurns,
-          isolated,
-          inheritContext,
-          thinkingLevel: thinking,
-          isolation,
-          ...fgCallbacks,
-        }
-      );
-
-      clearInterval(spinnerInterval);
-
-      // Clean up foreground agent from widget
-      if (fgId) {
-        agentActivity.delete(fgId);
-        widget.markFinished(fgId);
-      }
-
-      // Get final token count
-      const tokenText = safeFormatTokens(fgState.session);
-
-      const details = buildDetails(detailBase, record, fgState, {
-        tokens: tokenText,
-      });
-
-      const fallbackNote = fellBack
-        ? `Note: Unknown agent type "${rawType}" — using general-purpose.\n\n`
-        : "";
-
-      if (record.status === "error") {
-        return textResult(
-          `${fallbackNote}Agent failed: ${record.error}`,
-          details
-        );
-      }
-
-      const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
-      const statsParts = [`${record.toolUses} tool uses`];
-      if (tokenText) {
-        statsParts.push(tokenText);
-      }
-      return textResult(
-        `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
-          (record.result?.trim() || "No output."),
-        details
-      );
     },
   });
+
+  async function executeAgent(
+    params: any,
+    signal: AbortSignal | undefined,
+    onUpdate: any,
+    ctx: any
+  ) {
+    // Reload custom agents so new .pi/agents/*.md files are picked up without restart
+    reloadCustomAgents();
+
+    const rawType = params.subagent_type as SubagentType;
+    const resolved = resolveType(rawType);
+    const subagentType = resolved ?? "general-purpose";
+    const fellBack = resolved === undefined;
+
+    const displayName = getDisplayName(subagentType);
+
+    // Get agent config (if any)
+    const customConfig = getAgentConfig(subagentType);
+
+    const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
+
+    // Resolve model from agent config first; tool-call params only fill gaps.
+    let model = ctx.model;
+    if (resolvedConfig.modelInput) {
+      const resolved = resolveModel(
+        resolvedConfig.modelInput,
+        ctx.modelRegistry
+      );
+      if (typeof resolved === "string") {
+        if (resolvedConfig.modelFromParams) {
+          return textResult(resolved);
+        }
+        // config-specified: silent fallback to parent
+      } else {
+        model = resolved;
+      }
+    }
+
+    const thinking = resolvedConfig.thinking;
+    const inheritContext = resolvedConfig.inheritContext;
+    const runInBackground = resolvedConfig.runInBackground;
+    const isolated = resolvedConfig.isolated;
+    const isolation = resolvedConfig.isolation;
+
+    // Build display tags for non-default config
+    const effectiveModelId = model?.id;
+    const agentModelName = effectiveModelId
+      ? (model?.name ?? effectiveModelId)
+          .replace(/^Claude\s+/i, "")
+          .toLowerCase()
+      : undefined;
+    const agentTags: string[] = [];
+    const modeLabel = getPromptModeLabel(subagentType);
+    if (modeLabel) {
+      agentTags.push(modeLabel);
+    }
+    if (isolated) {
+      agentTags.push("isolated");
+    }
+    if (isolation === "worktree") {
+      agentTags.push("worktree");
+    }
+    const effectiveMaxTurns = normalizeMaxTurns(
+      resolvedConfig.maxTurns ?? getDefaultMaxTurns()
+    );
+    // Shared base fields for all AgentDetails in this call
+    const detailBase = {
+      displayName,
+      description: params.description,
+      subagentType,
+      modelName: agentModelName,
+      thinkingLevel: thinking,
+      tags: agentTags.length > 0 ? agentTags : undefined,
+    };
+
+    // Resume existing agent
+    if (params.resume) {
+      const existing = manager.getRecord(params.resume);
+      if (!existing) {
+        return textResult(
+          `Agent not found: "${params.resume}". It may have been cleaned up.`
+        );
+      }
+      if (!existing.session) {
+        return textResult(
+          `Agent "${params.resume}" has no active session to resume.`
+        );
+      }
+      const record = await manager.resume(params.resume, params.prompt, signal);
+      if (!record) {
+        return textResult(`Failed to resume agent "${params.resume}".`);
+      }
+      return textResult(
+        record.result?.trim() || record.error?.trim() || "No output.",
+        buildDetails(detailBase, record)
+      );
+    }
+
+    // Background execution
+    if (runInBackground) {
+      const { state: bgState, callbacks: bgCallbacks } =
+        createActivityTracker(effectiveMaxTurns);
+
+      // Wrap onSessionCreated to wire output file streaming.
+      // The callback lazily reads record.outputFile (set right after spawn)
+      // rather than closing over a value that doesn't exist yet.
+      let id: string;
+      const origBgOnSession = bgCallbacks.onSessionCreated;
+      bgCallbacks.onSessionCreated = (session: any) => {
+        origBgOnSession(session);
+        const rec = manager.getRecord(id);
+        if (rec?.outputFile) {
+          rec.outputCleanup = streamToOutputFile(
+            session,
+            rec.outputFile,
+            id,
+            ctx.cwd
+          );
+        }
+      };
+
+      id = manager.spawn(pi, ctx, subagentType, params.prompt, {
+        description: params.description,
+        model,
+        maxTurns: effectiveMaxTurns,
+        isolated,
+        inheritContext,
+        thinkingLevel: thinking,
+        isBackground: true,
+        isolation,
+        ...bgCallbacks,
+      });
+
+      // Set output file + join mode synchronously after spawn, before the
+      // event loop yields — onSessionCreated is async so this is safe.
+      const joinMode = resolveJoinMode(defaultJoinMode, true);
+      const record = manager.getRecord(id);
+      if (record && joinMode) {
+        record.joinMode = joinMode;
+        record.toolCallId = toolCallId;
+        record.outputFile = createOutputFilePath(
+          ctx.cwd,
+          id,
+          ctx.sessionManager.getSessionId()
+        );
+        writeInitialEntry(record.outputFile, id, params.prompt, ctx.cwd);
+      }
+
+      if (joinMode == null || joinMode === "async") {
+        // Foreground/no join mode or explicit async — not part of any batch
+      } else {
+        // smart or group — add to current batch
+        currentBatchAgents.push({ id, joinMode });
+        // Debounce: reset timer on each new agent so parallel tool calls
+        // dispatched across multiple event loop ticks are captured together
+        if (batchFinalizeTimer) {
+          clearTimeout(batchFinalizeTimer);
+        }
+        batchFinalizeTimer = setTimeout(finalizeBatch, 100);
+      }
+
+      agentActivity.set(id, bgState);
+      widget.ensureTimer();
+      widget.update();
+
+      // Emit created event
+      pi.events.emit("subagents:created", {
+        id,
+        type: subagentType,
+        description: params.description,
+        isBackground: true,
+      });
+
+      const isQueued = record?.status === "queued";
+      return textResult(
+        `Agent ${isQueued ? "queued" : "started"} in background.\n` +
+          `Agent ID: ${id}\n` +
+          `Type: ${displayName}\n` +
+          `Description: ${params.description}\n` +
+          (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
+          (isQueued
+            ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n`
+            : "") +
+          "\nYou will be notified when this agent completes.\n" +
+          "Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n" +
+          `Do not duplicate this agent's work.`,
+        {
+          ...detailBase,
+          toolUses: 0,
+          tokens: "",
+          durationMs: 0,
+          status: "background" as const,
+          agentId: id,
+        }
+      );
+    }
+
+    // Foreground (synchronous) execution — stream progress via onUpdate
+    let spinnerFrame = 0;
+    const startedAt = Date.now();
+    let fgId: string | undefined;
+
+    const streamUpdate = () => {
+      const details: AgentDetails = {
+        ...detailBase,
+        toolUses: fgState.toolUses,
+        tokens: fgState.tokens,
+        turnCount: fgState.turnCount,
+        maxTurns: fgState.maxTurns,
+        durationMs: Date.now() - startedAt,
+        status: "running",
+        activity: describeActivity(fgState.activeTools, fgState.responseText),
+        spinnerFrame: spinnerFrame % SPINNER.length,
+      };
+      onUpdate?.({
+        content: [{ type: "text", text: `${fgState.toolUses} tool uses...` }],
+        details: details as any,
+      });
+    };
+
+    const { state: fgState, callbacks: fgCallbacks } = createActivityTracker(
+      effectiveMaxTurns,
+      streamUpdate
+    );
+
+    // Wire session creation to register in widget
+    const origOnSession = fgCallbacks.onSessionCreated;
+    fgCallbacks.onSessionCreated = (session: any) => {
+      origOnSession(session);
+      for (const a of manager.listAgents()) {
+        if (a.session === session) {
+          fgId = a.id;
+          agentActivity.set(a.id, fgState);
+          widget.ensureTimer();
+          break;
+        }
+      }
+    };
+
+    // Animate spinner at ~80ms (smooth rotation through 10 braille frames)
+    const spinnerInterval = setInterval(() => {
+      spinnerFrame++;
+      streamUpdate();
+    }, 80);
+
+    streamUpdate();
+
+    const record = await manager.spawnAndWait(
+      pi,
+      ctx,
+      subagentType,
+      params.prompt,
+      {
+        description: params.description,
+        model,
+        maxTurns: effectiveMaxTurns,
+        isolated,
+        inheritContext,
+        thinkingLevel: thinking,
+        isolation,
+        ...fgCallbacks,
+      }
+    );
+
+    clearInterval(spinnerInterval);
+
+    // Clean up foreground agent from widget
+    if (fgId) {
+      agentActivity.delete(fgId);
+      widget.markFinished(fgId);
+    }
+
+    // Get final token count
+    const tokenText = safeFormatTokens(fgState.session);
+
+    const details = buildDetails(detailBase, record, fgState, {
+      tokens: tokenText,
+    });
+
+    const fallbackNote = fellBack
+      ? `Note: Unknown agent type "${rawType}" — using general-purpose.\n\n`
+      : "";
+
+    if (record.status === "error") {
+      return textResult(
+        `${fallbackNote}Agent failed: ${record.error}`,
+        details
+      );
+    }
+
+    const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
+    const statsParts = [`${record.toolUses} tool uses`];
+    if (tokenText) {
+      statsParts.push(tokenText);
+    }
+    return textResult(
+      `${fallbackNote}Agent completed in ${formatMs(durationMs)} (${statsParts.join(", ")})${getStatusNote(record.status)}.\n\n` +
+        (record.result?.trim() || "No output."),
+      details
+    );
+  }
 
   // ---- get_subagent_result tool ----
 
