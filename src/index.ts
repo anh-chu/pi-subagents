@@ -11,8 +11,8 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, unlinkSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -23,7 +23,6 @@ import { GroupJoinManager } from "./group-join.js";
 import { getAvailableTypes, getAllTypes, getDefaultAgentNames, getUserAgentNames, getAgentConfig, resolveType, registerAgents, BUILTIN_TOOL_NAMES } from "./agent-types.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { resolveModel, type ModelRegistry } from "./model-resolver.js";
-import { exportAgentSession } from "./export.js";
 import {
   AgentWidget,
   SPINNER,
@@ -293,9 +292,6 @@ export default function (pi: ExtensionAPI) {
   // Wait for all subagents on shutdown, then dispose the manager
   pi.on("session_shutdown", async () => {
     delete (globalThis as any)[MANAGER_KEY];
-    if (batchFinalizeTimer) clearTimeout(batchFinalizeTimer);
-    widget.dispose();
-    groupJoin.dispose();
     await manager.waitForAll();
     manager.dispose();
   });
@@ -768,21 +764,17 @@ Guidelines:
 
       streamUpdate();
 
-      let record: AgentRecord;
-      try {
-        record = await manager.spawnAndWait(pi, ctx, subagentType, params.prompt, {
-          description: params.description,
-          model,
-          maxTurns: params.max_turns,
-          isolated,
-          inheritContext,
-          thinkingLevel: thinking,
-          parentSignal: signal,
-          ...fgCallbacks,
-        });
-      } finally {
-        clearInterval(spinnerInterval);
-      }
+      const record = await manager.spawnAndWait(pi, ctx, subagentType, params.prompt, {
+        description: params.description,
+        model,
+        maxTurns: params.max_turns,
+        isolated,
+        inheritContext,
+        thinkingLevel: thinking,
+        ...fgCallbacks,
+      });
+
+      clearInterval(spinnerInterval);
 
       // Clean up foreground agent from widget
       if (fgId) {
@@ -1035,7 +1027,6 @@ Guidelines:
     // Actions
     options.push("Create new agent");
     options.push("Settings");
-    options.push("Export agent");
 
     const noAgentsMsg = allNames.length === 0 && agents.length === 0
       ? "No agents found. Create specialized subagents that can be delegated to.\n\n" +
@@ -1060,9 +1051,6 @@ Guidelines:
       await showCreateWizard(ctx);
     } else if (choice === "Settings") {
       await showSettings(ctx);
-      await showAgentsMenu(ctx);
-    } else if (choice === "Export agent") {
-      await exportAgent(ctx);
       await showAgentsMenu(ctx);
     }
   }
@@ -1574,63 +1562,6 @@ ${systemPrompt}
           ctx.ui.notify("Must be at least 1 minute.", "warning");
         }
       }
-    }
-  }
-
-  async function exportAgent(ctx: ExtensionCommandContext) {
-    const allAgents = manager.listAgents();
-    // Filter out agents without sessions (cleaned up)
-    const availableAgents = allAgents.filter(a => a.session !== undefined);
-
-    if (availableAgents.length === 0) {
-      ctx.ui.notify("No agents with active sessions to export.", "warning");
-      return;
-    }
-
-    // Build list items
-    const options = availableAgents.map(a => {
-      const name = getDisplayName(a.type);
-      const status = a.status === "running" ? `${a.status} (still running)` : a.status;
-      return `${a.id}: ${name} · ${a.description} · ${status}`;
-    });
-
-    const choice = await ctx.ui.select("Select agent to export", options);
-    if (!choice) return;
-
-    // Parse the selected option to get agent ID
-    const selectedId = choice.split(":")[0].trim();
-    const record = manager.getRecord(selectedId);
-    if (!record || !record.session) {
-      ctx.ui.notify("Agent session no longer available.", "warning");
-      return;
-    }
-
-    // Default filename with timestamp
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -5);
-    const defaultFilename = `agent-${record.id}-${record.type}-${timestamp}.md`;
-
-    const path = await ctx.ui.input("Export path", defaultFilename);
-    if (!path) return;
-
-    // Export session to markdown
-    const markdown = exportAgentSession(record.session, record);
-
-    try {
-      // Ensure parent directory exists
-      const dir = dirname(path);
-      if (dir && dir !== "." && !existsSync(join(ctx.cwd, dir))) {
-        mkdirSync(join(ctx.cwd, dir), { recursive: true });
-      }
-
-      // Resolve relative paths against cwd
-      const resolvedPath = join(ctx.cwd, path);
-      writeFileSync(resolvedPath, markdown, "utf-8");
-
-      const lineCount = markdown.split("\n").length;
-      ctx.ui.notify(`Exported to ${resolvedPath} (${lineCount} lines)`, "info");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(`Failed to export: ${msg}`, "error");
     }
   }
 
