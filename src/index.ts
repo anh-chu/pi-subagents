@@ -2406,6 +2406,7 @@ ${systemPrompt}
   }
 
   function getSettingsOptions() {
+    const cleanupMinutes = Math.round(manager.getCleanupTimeoutMs() / 60_000);
     return [
       {
         value: "max-concurrency",
@@ -2422,6 +2423,10 @@ ${systemPrompt}
       {
         value: "join-mode",
         label: `Join mode (current: ${getDefaultJoinMode()})`,
+      },
+      {
+        value: "cleanup-timeout",
+        label: `Cleanup timeout (current: ${cleanupMinutes} min)`,
       },
     ];
   }
@@ -2519,6 +2524,26 @@ ${systemPrompt}
             const mode = val.split(" ")[0] as JoinMode;
             setDefaultJoinMode(mode);
             ctx.ui.notify(`Default join mode set to ${mode}`, "info");
+          }
+          break;
+        }
+
+        case "cleanup-timeout": {
+          const cleanupMinutes = Math.round(
+            manager.getCleanupTimeoutMs() / 60_000
+          );
+          const val = await ctx.ui.input(
+            "Cleanup timeout in minutes (how long to keep completed agent sessions)",
+            String(cleanupMinutes)
+          );
+          if (val) {
+            const n = Number.parseInt(val, 10);
+            if (n >= 1 && !Number.isNaN(n)) {
+              manager.setCleanupTimeoutMs(n * 60_000);
+              ctx.ui.notify(`Cleanup timeout set to ${n} minutes`, "info");
+            } else {
+              ctx.ui.notify("Must be at least 1 minute.", "warning");
+            }
           }
           break;
         }
