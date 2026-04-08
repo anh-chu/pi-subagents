@@ -173,6 +173,7 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
   const state: AgentActivity = {
     activeTools: new Map(),
     toolUses: 0,
+    turns: 1,
     turnCount: 1,
     maxTurns,
     tokens: "",
@@ -732,7 +733,7 @@ export default function (pi: ExtensionAPI) {
         events: pi.events as any,
         pi,
         getCtx: () => currentCtx,
-        manager,
+        manager: manager as any,
       })
     : { unsubPing: () => {}, unsubSpawn: () => {}, unsubStop: () => {} };
 
@@ -1287,6 +1288,7 @@ Guidelines:
         thinkingLevel: thinking,
         isBackground: true,
         isolation,
+        parentSignal: signal,
         ...bgCallbacks,
       });
 
@@ -1296,7 +1298,6 @@ Guidelines:
       const record = manager.getRecord(id);
       if (record && joinMode) {
         record.joinMode = joinMode;
-        record.toolCallId = toolCallId;
         record.outputFile = createOutputFilePath(
           ctx.cwd,
           id,
