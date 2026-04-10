@@ -765,6 +765,9 @@ export default function (pi: ExtensionAPI) {
       clearTimeout(timer);
     }
     pendingNudges.clear();
+    widget.dispose();
+    groupJoin.dispose();
+    await manager.waitForAll();
     manager.dispose();
     if (ctx) {
       parentBridge.disposeSession(
