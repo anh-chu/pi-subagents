@@ -179,12 +179,13 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
     responseText: "",
     session: undefined,
   };
+  let toolCounter = 0;
 
   const callbacks = {
     onToolActivity: (activity: { type: "start" | "end"; toolName: string }) => {
       if (activity.type === "start") {
         state.activeTools.set(
-          activity.toolName + "_" + Date.now(),
+          `${activity.toolName}_${++toolCounter}`,
           activity.toolName
         );
       } else {
