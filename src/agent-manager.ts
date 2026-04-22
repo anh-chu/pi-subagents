@@ -6,23 +6,28 @@
  * Foreground agents bypass the queue (they block the parent anyway).
  */
 
-import type { ExtensionContext, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import type { Model } from "@mariozechner/pi-ai";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import { runAgent, resumeAgent, type ToolActivity } from "./agent-runner.js";
-import type { SubagentType, AgentRecord, ThinkingLevel } from "./types.js";
+import type { AgentSession, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { parentBridge } from "./parent-bridge.js";
+import type { AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
+import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
+
+function getModelName(model?: Model<any>): string | undefined {
+  const label = model?.name ?? model?.id;
+  return label ? label.replace(/^Claude\s+/i, "").toLowerCase() : undefined;
+}
+
+function getParentSessionId(ctx: ExtensionContext): string | undefined {
+  return ctx.sessionManager?.getSessionId?.();
+}
 
 export type OnAgentComplete = (record: AgentRecord) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 
 /** Default max concurrent background agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
-
-/** Default cleanup timeout: 1 hour in milliseconds. */
-const DEFAULT_CLEANUP_TIMEOUT_MS = 60 * 60 * 1000;
-
-/** Timer interval for cleanup checks (1 minute). */
-const CLEANUP_INTERVAL_MS = 60 * 1000;
 
 interface SpawnArgs {
   pi: ExtensionAPI;
@@ -40,14 +45,16 @@ interface SpawnOptions {
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
   isBackground?: boolean;
+  /** Isolation mode — "worktree" creates a temp git worktree for the agent. */
+  isolation?: IsolationMode;
   /** Called on tool start/end with activity info (for streaming progress to UI). */
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
-  /** Called at the end of each agentic turn with (currentTurn, maxTurns). */
-  onTurnEnd?: (turn: number, maxTurns: number) => void;
   /** Called when the agent session is created (for accessing session stats). */
   onSessionCreated?: (session: AgentSession) => void;
+  /** Called at the end of each agentic turn with the cumulative count. */
+  onTurnEnd?: (turnCount: number) => void;
 }
 
 export class AgentManager {
@@ -56,21 +63,18 @@ export class AgentManager {
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
   private maxConcurrent: number;
-  private cleanupTimeoutMs: number;
-  private nextId = 1;
 
   /** Queue of background agents waiting to start. */
   private queue: { id: string; args: SpawnArgs }[] = [];
   /** Number of currently running background agents. */
   private runningBackground = 0;
 
-  constructor(onComplete?: OnAgentComplete, maxConcurrent = DEFAULT_MAX_CONCURRENT, onStart?: OnAgentStart, cleanupTimeoutMs = DEFAULT_CLEANUP_TIMEOUT_MS) {
+  constructor(onComplete?: OnAgentComplete, maxConcurrent = DEFAULT_MAX_CONCURRENT, onStart?: OnAgentStart) {
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.maxConcurrent = maxConcurrent;
-    this.cleanupTimeoutMs = cleanupTimeoutMs;
-    // Run cleanup checks every minute (interval is fixed; timeout is configurable)
-    this.cleanupInterval = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
+    // Cleanup completed agents after 10 minutes (but keep sessions for resume)
+    this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
   }
 
   /** Update the max concurrent background agents limit. */
@@ -84,15 +88,6 @@ export class AgentManager {
     return this.maxConcurrent;
   }
 
-  /** Update the cleanup timeout (how long to keep completed agent sessions). */
-  setCleanupTimeoutMs(ms: number) {
-    this.cleanupTimeoutMs = ms;
-  }
-
-  getCleanupTimeoutMs(): number {
-    return this.cleanupTimeoutMs;
-  }
-
   /**
    * Spawn an agent and return its ID immediately (for background use).
    * If the concurrency limit is reached, the agent is queued.
@@ -104,13 +99,15 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
-    const id = String(this.nextId++);
+    const id = randomUUID().slice(0, 17);
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
       type,
       description: options.description,
       status: options.isBackground ? "queued" : "running",
+      modelName: getModelName(options.model),
+      thinkingLevel: options.thinkingLevel,
       toolUses: 0,
       startedAt: Date.now(),
       abortController,
@@ -120,10 +117,7 @@ export class AgentManager {
     const args: SpawnArgs = { pi, ctx, type, prompt, options };
 
     if (options.isBackground && this.runningBackground >= this.maxConcurrent) {
-      // Create a deferred promise so callers can await queued agents
-      let resolveDeferred!: (v: string) => void;
-      record.promise = new Promise(r => { resolveDeferred = r; });
-      record._resolveDeferred = resolveDeferred;
+      // Queue it — will be started when a running agent completes
       this.queue.push({ id, args });
       return id;
     }
@@ -139,25 +133,49 @@ export class AgentManager {
     if (options.isBackground) this.runningBackground++;
     this.onStart?.(record);
 
-    const promise = runAgent(ctx, type, prompt, {
+    // Worktree isolation: create a temporary git worktree if requested
+    let worktreeCwd: string | undefined;
+    let worktreeWarning = "";
+    if (options.isolation === "worktree") {
+      const wt = createWorktree(ctx.cwd, id);
+      if (wt) {
+        record.worktree = wt;
+        worktreeCwd = wt.path;
+      } else {
+        worktreeWarning = "\n\n[WARNING: Worktree isolation was requested but failed (not a git repo, or no commits yet). Running in the main working directory instead.]";
+      }
+    }
+
+    // Prepend worktree warning to prompt if isolation failed
+    const effectivePrompt = worktreeWarning ? worktreeWarning + "\n\n" + prompt : prompt;
+
+    const promise = runAgent(ctx, type, effectivePrompt, {
       pi,
+      agentId: id,
+      parentSessionId: getParentSessionId(ctx),
+      allowAskParent: Boolean(options.isBackground),
       model: options.model,
       maxTurns: options.maxTurns,
       isolated: options.isolated,
       inheritContext: options.inheritContext,
       thinkingLevel: options.thinkingLevel,
-      agentId: id,
-      agentDescription: options.description,
-      isResultConsumed: () => !!record.resultConsumed,
+      cwd: worktreeCwd,
       signal: record.abortController!.signal,
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
         options.onToolActivity?.(activity);
       },
-      onTextDelta: options.onTextDelta,
       onTurnEnd: options.onTurnEnd,
+      onTextDelta: options.onTextDelta,
       onSessionCreated: (session) => {
         record.session = session;
+        // Flush any steers that arrived before the session was ready
+        if (record.pendingSteers?.length) {
+          for (const msg of record.pendingSteers) {
+            session.steer(msg).catch(() => {});
+          }
+          record.pendingSteers = undefined;
+        }
         options.onSessionCreated?.(session);
       },
     })
@@ -169,6 +187,24 @@ export class AgentManager {
         record.result = responseText;
         record.session = session;
         record.completedAt ??= Date.now();
+        this.disposeBridgeState(id, `Agent ${id} ${record.status}.`);
+
+        // Final flush of streaming output file
+        if (record.outputCleanup) {
+          try { record.outputCleanup(); } catch { /* ignore */ }
+          record.outputCleanup = undefined;
+        }
+
+        // Clean up worktree if used
+        if (record.worktree) {
+          const wtResult = cleanupWorktree(ctx.cwd, record.worktree, options.description);
+          record.worktreeResult = wtResult;
+          if (wtResult.hasChanges && wtResult.branch) {
+            record.result = (record.result ?? "") +
+              `\n\n---\nChanges saved to branch \`${wtResult.branch}\`. Merge with: \`git merge ${wtResult.branch}\``;
+          }
+        }
+
         if (options.isBackground) {
           this.runningBackground--;
           this.onComplete?.(record);
@@ -183,6 +219,22 @@ export class AgentManager {
         }
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt ??= Date.now();
+        this.disposeBridgeState(id, `Agent ${id} ${record.status}.`);
+
+        // Final flush of streaming output file on error
+        if (record.outputCleanup) {
+          try { record.outputCleanup(); } catch { /* ignore */ }
+          record.outputCleanup = undefined;
+        }
+
+        // Best-effort worktree cleanup on error
+        if (record.worktree) {
+          try {
+            const wtResult = cleanupWorktree(ctx.cwd, record.worktree, options.description);
+            record.worktreeResult = wtResult;
+          } catch { /* ignore cleanup errors */ }
+        }
+
         if (options.isBackground) {
           this.runningBackground--;
           this.onComplete?.(record);
@@ -191,12 +243,6 @@ export class AgentManager {
         return "";
       });
 
-    // If spawned from queue, resolve the deferred promise when the real one settles
-    const resolveDeferred = record._resolveDeferred;
-    if (resolveDeferred) {
-      promise.then(resolveDeferred);
-      delete record._resolveDeferred;
-    }
     record.promise = promise;
   }
 
@@ -254,10 +300,12 @@ export class AgentManager {
       record.status = "completed";
       record.result = responseText;
       record.completedAt = Date.now();
+      this.disposeBridgeState(id, `Agent ${id} completed.`);
     } catch (err) {
       record.status = "error";
       record.error = err instanceof Error ? err.message : String(err);
       record.completedAt = Date.now();
+      this.disposeBridgeState(id, `Agent ${id} error.`);
     }
 
     return record;
@@ -280,6 +328,7 @@ export class AgentManager {
     // Remove from queue if queued
     if (record.status === "queued") {
       this.queue = this.queue.filter(q => q.id !== id);
+      this.disposeBridgeState(id, `Agent ${id} removed from queue.`);
       record.status = "stopped";
       record.completedAt = Date.now();
       return true;
@@ -287,23 +336,41 @@ export class AgentManager {
 
     if (record.status !== "running") return false;
     record.abortController?.abort();
+    this.disposeBridgeState(id, `Agent ${id} stopped.`);
     record.status = "stopped";
     record.completedAt = Date.now();
     return true;
   }
 
+  private disposeBridgeState(id: string, reason: string): void {
+    parentBridge.disposeAgent(id, reason);
+  }
+
+  /** Dispose a record's session and remove it from the map. */
+  private removeRecord(id: string, record: AgentRecord): void {
+    this.disposeBridgeState(id, `Agent ${id} record removed.`);
+    record.session?.dispose?.();
+    record.session = undefined;
+    this.agents.delete(id);
+  }
+
   private cleanup() {
-    const cutoff = Date.now() - this.cleanupTimeoutMs;
+    const cutoff = Date.now() - 10 * 60_000;
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
       if ((record.completedAt ?? 0) >= cutoff) continue;
+      this.removeRecord(id, record);
+    }
+  }
 
-      // Dispose and clear session so memory can be reclaimed
-      if (record.session) {
-        record.session.dispose();
-        record.session = undefined;
-      }
-      this.agents.delete(id);
+  /**
+   * Remove all completed/stopped/errored records immediately.
+   * Called on session start/switch so tasks from a prior session don't persist.
+   */
+  clearCompleted(): void {
+    for (const [id, record] of this.agents) {
+      if (record.status === "running" || record.status === "queued") continue;
+      this.removeRecord(id, record);
     }
   }
 
@@ -312,6 +379,33 @@ export class AgentManager {
     return [...this.agents.values()].some(
       r => r.status === "running" || r.status === "queued",
     );
+  }
+
+  /** Abort all running and queued agents immediately. */
+  abortAll(): number {
+    let count = 0;
+    // Clear queued agents first
+    for (const queued of this.queue) {
+      const record = this.agents.get(queued.id);
+      if (record) {
+        this.disposeBridgeState(queued.id, `Agent ${queued.id} removed from queue.`);
+        record.status = "stopped";
+        record.completedAt = Date.now();
+        count++;
+      }
+    }
+    this.queue = [];
+    // Abort running agents
+    for (const [id, record] of this.agents) {
+      if (record.status === "running") {
+        record.abortController?.abort();
+        this.disposeBridgeState(id, `Agent ${id} stopped.`);
+        record.status = "stopped";
+        record.completedAt = Date.now();
+        count++;
+      }
+    }
+    return count;
   }
 
   /** Wait for all running and queued agents to complete (including queued ones). */
@@ -331,11 +425,11 @@ export class AgentManager {
 
   dispose() {
     clearInterval(this.cleanupInterval);
-    // Clear queue
-    this.queue = [];
-    for (const record of this.agents.values()) {
-      record.session?.dispose();
+    this.abortAll();
+    for (const [id, record] of this.agents) {
+      this.removeRecord(id, record);
     }
-    this.agents.clear();
+    // Prune any orphaned git worktrees (crash recovery)
+    try { pruneWorktrees(process.cwd()); } catch { /* ignore */ }
   }
 }

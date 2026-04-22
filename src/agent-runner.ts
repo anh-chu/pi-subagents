@@ -2,34 +2,43 @@
  * agent-runner.ts — Core execution engine: creates sessions, runs agents, collects results.
  */
 
+import type { Model } from "@mariozechner/pi-ai";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
-  createAgentSession,
-  DefaultResourceLoader,
-  SessionManager,
-  SettingsManager,
   type AgentSession,
   type AgentSessionEvent,
+  createAgentSession,
+  DefaultResourceLoader,
   type ExtensionAPI,
+  SessionManager,
+  SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { Model } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { getToolsForType, getConfig, getAgentConfig } from "./agent-types.js";
-import { buildAgentPrompt } from "./prompts.js";
+import { getAgentConfig, getConfig, getMemoryTools, getReadOnlyMemoryTools, getToolsForType } from "./agent-types.js";
 import { buildParentContext, extractText } from "./context.js";
 import { detectEnv } from "./env.js";
+import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
+import { DEFAULT_PARENT_SESSION_ID, parentBridge } from "./parent-bridge.js";
+import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
+import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"];
+const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent", "reply_to_subagent", "get_subagent_message"];
 
-/** Default max turns to prevent subagents from looping indefinitely. */
-let defaultMaxTurns = 50;
+/** Default max turns. undefined = unlimited (no turn limit). */
+let defaultMaxTurns: number | undefined;
 
-/** Get the default max turns value. */
-export function getDefaultMaxTurns(): number { return defaultMaxTurns; }
-/** Set the default max turns value (minimum 1). */
-export function setDefaultMaxTurns(n: number): void { defaultMaxTurns = Math.max(1, n); }
+/** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
+export function normalizeMaxTurns(n: number | undefined): number | undefined {
+  if (n == null || n === 0) return undefined;
+  return Math.max(1, n);
+}
+
+/** Get the default max turns value. undefined = unlimited. */
+export function getDefaultMaxTurns(): number | undefined { return defaultMaxTurns; }
+/** Set the default max turns value. undefined or 0 = unlimited, otherwise minimum 1. */
+export function setDefaultMaxTurns(n: number | undefined): void { defaultMaxTurns = normalizeMaxTurns(n); }
 
 /** Additional turns allowed after the soft limit steer message. */
 let graceTurns = 5;
@@ -79,26 +88,27 @@ export interface ToolActivity {
 export interface RunOptions {
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
+  /** Stable runtime ID for parent bridge routing. */
+  agentId?: string;
+  /** Parent session affinity for bridge delivery. */
+  parentSessionId?: string;
+  /** Whether the subagent may block on ask_parent. */
+  allowAskParent?: boolean;
   model?: Model<any>;
   maxTurns?: number;
   signal?: AbortSignal;
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** Override working directory (e.g. for worktree isolation). */
+  cwd?: string;
   /** Called on tool start/end with activity info. */
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
-  /** Called at the end of each agentic turn with (currentTurn, maxTurns). */
-  onTurnEnd?: (turn: number, maxTurns: number) => void;
   onSessionCreated?: (session: AgentSession) => void;
-  /** Agent ID — enables send_message tool when set. */
-  agentId?: string;
-  /** Agent description — used in send_message attribution. */
-  agentDescription?: string;
-  /** If provided, send_message checks this before delivering. Suppresses stale
-   *  messages when the parent has already consumed results via get_subagent_result. */
-  isResultConsumed?: () => boolean;
+  /** Called at the end of each agentic turn with the cumulative count. */
+  onTurnEnd?: (turnCount: number) => void;
 }
 
 export interface RunResult {
@@ -127,6 +137,17 @@ function collectResponseText(session: AgentSession) {
   return { getText: () => text, unsubscribe };
 }
 
+/** Get the last assistant text from the completed session history. */
+function getLastAssistantText(session: AgentSession): string {
+  for (let i = session.messages.length - 1; i >= 0; i--) {
+    const msg = session.messages[i];
+    if (msg.role !== "assistant") continue;
+    const text = extractText(msg.content).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
 /**
  * Wire an AbortSignal to abort a session.
  * Returns a cleanup function to remove the listener.
@@ -138,6 +159,64 @@ function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => 
   return () => signal.removeEventListener("abort", onAbort);
 }
 
+function createParentBridgeTools(
+  agentId: string,
+  parentSessionId = DEFAULT_PARENT_SESSION_ID,
+  allowAskParent = true,
+) {
+  const tools = [
+    {
+      name: "message_parent",
+      label: "Message Parent",
+      description: "Queue a one-way message for the parent agent.",
+      parameters: Type.Object({
+        message: Type.String({
+          description: "The message to send to the parent agent.",
+        }),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const { message } = params as { message: string };
+        const queued = parentBridge.messageParent(agentId, message, { sessionId: parentSessionId });
+        return {
+          content: [{ type: "text" as const, text: `Queued message for parent (${queued.requestId}).` }],
+          details: { requestId: queued.requestId },
+        };
+      },
+    },
+  ];
+
+  if (!allowAskParent) return tools;
+
+  tools.push({
+    name: "ask_parent",
+    label: "Ask Parent",
+    description: "Ask the parent agent a question and wait for a reply.",
+    parameters: Type.Object({
+      message: Type.String({
+        description: "The question or request for the parent agent.",
+      }),
+      timeout_ms: Type.Optional(Type.Number({
+        description: "Optional timeout in milliseconds while waiting for the parent reply.",
+        minimum: 1,
+      })),
+    }),
+    async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
+      const { message, timeout_ms } = params as { message: string; timeout_ms?: number };
+      const reply = await parentBridge.askParent(agentId, message, {
+        sessionId: parentSessionId,
+        signal,
+        timeoutMs: timeout_ms,
+      });
+      return {
+        content: [{ type: "text" as const, text: reply.text }],
+        details: { requestId: reply.requestId },
+      };
+    },
+  });
+
+  return tools;
+}
+
 export async function runAgent(
   ctx: ExtensionContext,
   type: SubagentType,
@@ -146,15 +225,62 @@ export async function runAgent(
 ): Promise<RunResult> {
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
-  const env = await detectEnv(options.pi, ctx.cwd);
+
+  // Resolve working directory: worktree override > parent cwd
+  const effectiveCwd = options.cwd ?? ctx.cwd;
+
+  const env = await detectEnv(options.pi, effectiveCwd);
 
   // Get parent system prompt for append-mode agents
   const parentSystemPrompt = ctx.getSystemPrompt();
 
+  // Build prompt extras (memory, skill preloading)
+  const extras: PromptExtras = {};
+
+  // Resolve extensions/skills: isolated overrides to false
+  const extensions = options.isolated ? false : config.extensions;
+  const skills = options.isolated ? false : config.skills;
+
+  // Skill preloading: when skills is string[], preload their content into prompt
+  if (Array.isArray(skills)) {
+    const loaded = preloadSkills(skills, effectiveCwd);
+    if (loaded.length > 0) {
+      extras.skillBlocks = loaded;
+    }
+  }
+
+  let tools = getToolsForType(type, effectiveCwd);
+  if (options.agentId) {
+    tools = [...tools, ...createParentBridgeTools(options.agentId, options.parentSessionId, options.allowAskParent)];
+  }
+
+  // Persistent memory: detect write capability and branch accordingly.
+  // Account for disallowedTools — a tool in the base set but on the denylist is not truly available.
+  if (agentConfig?.memory) {
+    const existingNames = new Set(tools.map(t => t.name));
+    const denied = agentConfig.disallowedTools ? new Set(agentConfig.disallowedTools) : undefined;
+    const effectivelyHas = (name: string) => existingNames.has(name) && !denied?.has(name);
+    const hasWriteTools = effectivelyHas("write") || effectivelyHas("edit");
+
+    if (hasWriteTools) {
+      // Read-write memory: add any missing memory tools (read/write/edit)
+      const memTools = getMemoryTools(effectiveCwd, existingNames);
+      if (memTools.length > 0) tools = [...tools, ...memTools];
+      extras.memoryBlock = buildMemoryBlock(agentConfig.name, agentConfig.memory, effectiveCwd);
+    } else {
+      // Read-only memory: only add read tool, use read-only prompt
+      if (!existingNames.has("read")) {
+        const readTools = getReadOnlyMemoryTools(effectiveCwd, existingNames);
+        if (readTools.length > 0) tools = [...tools, ...readTools];
+      }
+      extras.memoryBlock = buildReadOnlyMemoryBlock(agentConfig.name, agentConfig.memory, effectiveCwd);
+    }
+  }
+
   // Build system prompt from agent config
   let systemPrompt: string;
   if (agentConfig) {
-    systemPrompt = buildAgentPrompt(agentConfig, ctx.cwd, env, parentSystemPrompt);
+    systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parentSystemPrompt, extras);
   } else {
     // Unknown type fallback: general-purpose (defensive — unreachable in practice
     // since index.ts resolves unknown types to "general-purpose" before calling runAgent)
@@ -168,50 +294,18 @@ export async function runAgent(
       inheritContext: false,
       runInBackground: false,
       isolated: false,
-    }, ctx.cwd, env, parentSystemPrompt);
+    }, effectiveCwd, env, parentSystemPrompt, extras);
   }
 
-  const tools = getToolsForType(type, ctx.cwd);
-
-  // Build send_message as a custom tool (injected via customTools, not the builtin tools array)
-  const customTools: typeof tools = [];
-  if (options.pi && options.agentId) {
-    const agentId = options.agentId;
-    const agentLabel = `${type} (${options.agentDescription ?? agentId})`;
-
-    customTools.push({
-      name: "send_message",
-      label: "Send Message",
-      description: "Send a fire-and-forget message to the parent agent. " +
-        "No reply comes through this tool — if the parent responds, it arrives as a user message. " +
-        "Use for status updates, early findings, or flagging blockers.",
-      parameters: Type.Object({
-        message: Type.String({ description: "The message to send to the parent." }),
-      }),
-      execute: async (_id: string, params: { message: string }) => {
-        // Skip delivery if the parent already consumed this agent's result —
-        // the message would just be stale noise at that point.
-        if (options.isResultConsumed?.()) {
-          return { content: [{ type: "text" as const, text: "Message suppressed (parent already has results)." }], details: {} };
-        }
-        options.pi.sendUserMessage(
-          `Message from agent ${agentId} (${agentLabel}):\n\n${params.message}`,
-          { deliverAs: "followUp" },
-        );
-        return { content: [{ type: "text" as const, text: "Message sent to parent." }], details: {} };
-      },
-    });
-  }
-
-  // Resolve extensions/skills: isolated overrides to false
-  const extensions = options.isolated ? false : config.extensions;
-  const skills = options.isolated ? false : config.skills;
+  // When skills is string[], we've already preloaded them into the prompt.
+  // Still pass noSkills: true since we don't need the skill loader to load them again.
+  const noSkills = skills === false || Array.isArray(skills);
 
   // Load extensions/skills: true or string[] → load; false → don't
   const loader = new DefaultResourceLoader({
-    cwd: ctx.cwd,
+    cwd: effectiveCwd,
     noExtensions: extensions === false,
-    noSkills: skills === false,
+    noSkills,
     noPromptTemplates: true,
     noThemes: true,
     systemPromptOverride: () => systemPrompt,
@@ -227,13 +321,12 @@ export async function runAgent(
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;
 
   const sessionOpts: Record<string, unknown> = {
-    cwd: ctx.cwd,
-    sessionManager: SessionManager.inMemory(ctx.cwd),
+    cwd: effectiveCwd,
+    sessionManager: SessionManager.inMemory(effectiveCwd),
     settingsManager: SettingsManager.create(),
     modelRegistry: ctx.modelRegistry,
     model,
     tools,
-    customTools,
     resourceLoader: loader,
   };
   if (thinkingLevel) {
@@ -243,12 +336,18 @@ export async function runAgent(
   // createAgentSession's type signature may not include thinkingLevel yet
   const { session } = await createAgentSession(sessionOpts as Parameters<typeof createAgentSession>[0]);
 
+  // Build disallowed tools set from agent config
+  const disallowedSet = agentConfig?.disallowedTools
+    ? new Set(agentConfig.disallowedTools)
+    : undefined;
+
   // Filter active tools: remove our own tools to prevent nesting,
-  // and apply extension allowlist if specified
+  // apply extension allowlist if specified, and apply disallowedTools denylist
   if (extensions !== false) {
     const builtinToolNames = new Set(tools.map(t => t.name));
     const activeTools = session.getActiveToolNames().filter((t) => {
       if (EXCLUDED_TOOL_NAMES.includes(t)) return false;
+      if (disallowedSet?.has(t)) return false;
       if (builtinToolNames.has(t)) return true;
       if (Array.isArray(extensions)) {
         return extensions.some(ext => t.startsWith(ext) || t.includes(ext));
@@ -256,13 +355,30 @@ export async function runAgent(
       return true;
     });
     session.setActiveToolsByName(activeTools);
+  } else if (disallowedSet) {
+    // Even with extensions disabled, apply denylist to built-in tools
+    const activeTools = session.getActiveToolNames().filter(t => !disallowedSet.has(t));
+    session.setActiveToolsByName(activeTools);
   }
+
+  // Bind extensions so that session_start fires and extensions can initialize
+  // (e.g. loading credentials, setting up state). Placed after tool filtering
+  // so extension-provided skills/prompts from extendResourcesFromExtensions()
+  // respect the active tool set. All ExtensionBindings fields are optional.
+  await session.bindExtensions({
+    onError: (err) => {
+      options.onToolActivity?.({
+        type: "end",
+        toolName: `extension-error:${err.extensionPath}`,
+      });
+    },
+  });
 
   options.onSessionCreated?.(session);
 
   // Track turns for graceful max_turns enforcement
   let turnCount = 0;
-  const maxTurns = options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns;
+  const maxTurns = normalizeMaxTurns(options.maxTurns ?? agentConfig?.maxTurns ?? defaultMaxTurns);
   let softLimitReached = false;
   let aborted = false;
 
@@ -270,13 +386,15 @@ export async function runAgent(
   const unsubTurns = session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "turn_end") {
       turnCount++;
-      options.onTurnEnd?.(turnCount, maxTurns);
-      if (!softLimitReached && turnCount >= maxTurns) {
-        softLimitReached = true;
-        session.steer("You have reached your turn limit. Wrap up immediately — provide your final answer now.");
-      } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
-        aborted = true;
-        session.abort();
+      options.onTurnEnd?.(turnCount);
+      if (maxTurns != null) {
+        if (!softLimitReached && turnCount >= maxTurns) {
+          softLimitReached = true;
+          session.steer("You have reached your turn limit. Wrap up immediately — provide your final answer now.");
+        } else if (softLimitReached && turnCount >= maxTurns + graceTurns) {
+          aborted = true;
+          session.abort();
+        }
       }
     }
     if (event.type === "message_start") {
@@ -314,7 +432,8 @@ export async function runAgent(
     cleanupAbort();
   }
 
-  return { responseText: collector.getText(), session, aborted, steered: softLimitReached };
+  const responseText = collector.getText().trim() || getLastAssistantText(session);
+  return { responseText, session, aborted, steered: softLimitReached };
 }
 
 /**
@@ -343,7 +462,7 @@ export async function resumeAgent(
     cleanupAbort();
   }
 
-  return collector.getText();
+  return collector.getText().trim() || getLastAssistantText(session);
 }
 
 /**
@@ -374,7 +493,7 @@ export function getAgentConversation(session: AgentSession): string {
       const toolCalls: string[] = [];
       for (const c of msg.content) {
         if (c.type === "text" && c.text) textParts.push(c.text);
-        else if (c.type === "toolCall") toolCalls.push(`  Tool: ${(c as any).toolName ?? "unknown"}`);
+        else if (c.type === "toolCall") toolCalls.push(`  Tool: ${(c as any).name ?? (c as any).toolName ?? "unknown"}`);
       }
       if (textParts.length > 0) parts.push(`[Assistant]: ${textParts.join("\n")}`);
       if (toolCalls.length > 0) parts.push(`[Tool Calls]:\n${toolCalls.join("\n")}`);
