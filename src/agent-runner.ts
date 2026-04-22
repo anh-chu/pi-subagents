@@ -240,6 +240,11 @@ export async function runAgent(
     noPromptTemplates: true,
     noThemes: true,
     systemPromptOverride: () => systemPrompt,
+    // Prevent AGENTS.md / CLAUDE.md / APPEND_SYSTEM.md from leaking into
+    // sub-agent prompts. ResourceLoader otherwise re-appends these on top of
+    // the override, breaking `prompt_mode: replace` and `isolated` guarantees.
+    agentsFilesOverride: () => ({ agentsFiles: [] }),
+    appendSystemPromptOverride: () => [],
   });
   await loader.reload();
 
