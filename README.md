@@ -21,6 +21,10 @@
   - [`499343f`](https://github.com/elidickinson/pi-subagents/commit/499343fbf660a11da200a9020efba252637756d4), resource leak hardening on shutdown.
   - [`d077c0c`](https://github.com/elidickinson/pi-subagents/commit/d077c0ce9dd9add3e7630ad18038f4e6cb35e742), cleanup window 10m → 1h.
   - [`b750927`](https://github.com/elidickinson/pi-subagents/commit/b75092761ca7d6fc86ed1f1a9e02f7a60dbfbf2b), Explore inherits parent model by default.
+  - [`e53aae6`](https://github.com/elidickinson/pi-subagents/commit/e53aae6783af183548f4e749e7c3f148ec17ea44), allow `get_subagent_result(wait=true)` for queued agents.
+  - [`b62e939`](https://github.com/elidickinson/pi-subagents/commit/b62e939938496f42537f01fb8608f43866323bc3), cleanup timeout exposed in settings.
+  - [`de9c113`](https://github.com/elidickinson/pi-subagents/commit/de9c113d2ced9502dc5d19fb9019b4fce62e5687), add group-join regression tests + vitest config.
+  - [`4c18030`](https://github.com/elidickinson/pi-subagents/commit/4c180303f936bce70de0fa35412c581b8479fb5a), sequential numeric agent IDs.
 
 ### Imported from fork commit `b9cc2da`
 
