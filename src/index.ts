@@ -775,7 +775,10 @@ export default function (pi: ExtensionAPI) {
     waitForAll: () => manager.waitForAll(),
     hasRunning: () => manager.hasRunning(),
     spawn: (piRef: any, ctx: any, type: string, prompt: string, options: any) =>
-      manager.spawn(piRef, ctx, type, prompt, options),
+      manager.spawn(piRef, ctx, type, prompt, {
+        ...options,
+        sessionId: options?.sessionId ?? ctx?.sessionManager?.getSessionId?.(),
+      }),
     getRecord: (id: string) => manager.getRecord(id),
   };
 
@@ -1392,6 +1395,8 @@ Guidelines:
         isBackground: true,
         isolation,
         parentSignal: signal,
+        origin: "tool",
+        sessionId: ctx?.sessionManager?.getSessionId?.(),
         ...bgCallbacks,
       });
 
