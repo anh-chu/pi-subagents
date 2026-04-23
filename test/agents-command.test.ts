@@ -52,6 +52,7 @@ function getAgentsHandler(): (args: string[], ctx: any) => Promise<void> {
       }
     },
     registerTool: vi.fn(),
+    registerShortcut: vi.fn(),
     registerMessageRenderer: vi.fn(),
     sendMessage: vi.fn(),
     appendEntry: vi.fn(),

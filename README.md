@@ -20,6 +20,7 @@ A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-
 - **`get_subagent_result(wait=true)`** — can await queued (not yet started) agents in addition to running ones.
 - **Fuzzy model selection and crash guards** — unknown model strings and undefined `subagent_type` values are handled gracefully instead of crashing.
 - **Ephemeral child session guard** — lifecycle/UI events from in-memory child sessions are ignored so they don't interfere with the parent session state.
+- **Card grid widget** — running agents display as colored ANSI card widgets above the editor (ported from `pi-subagent-in-memory`), with `/agents-view` to toggle back to the classic tree layout.
 
 <img width="600" alt="pi-subagents screenshot" src="https://github.com/anh-chu/pi-subagents/raw/master/media/screenshot.png" />
 
@@ -31,7 +32,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 
 - **Claude Code look & feel** — same tool names, calling conventions, and UI patterns (`Agent`, `get_subagent_result`, `steer_subagent`, `reply_to_subagent`) — feels native
 - **Parallel background agents** — spawn multiple agents that run concurrently with automatic queuing (configurable concurrency limit, default 4) and smart group join (consolidated notifications)
-- **Live widget UI** — persistent above-editor widget with animated spinners, live tool activity, token counts, and colored status icons
+- **Live widget UI** — persistent above-editor widget showing running agents as colored card widgets (default) or classic spinner tree rows; toggle with `/agents-view`
 - **Conversation viewer** — select any agent in `/agents` to open a live-scrolling overlay of its full conversation (auto-follows new content, scroll up to pause)
 - **Custom agent types** — define agents in `.pi/agents/<name>.md` with YAML frontmatter: custom system prompts, model selection, thinking levels, tool restrictions
 - **Mid-run steering** — inject messages into running agents to redirect their work without restarting

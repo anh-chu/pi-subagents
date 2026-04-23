@@ -1,15 +1,15 @@
 /**
- * agent-widget.ts — Persistent widget showing running/completed agents above the editor.
+ * agent-widget.ts - Persistent widget showing running/completed agents above the editor.
  *
  * Displays a tree of agents with animated spinners, live stats, and activity descriptions.
  * Uses the callback form of setWidget for themed rendering.
  */
 
 import { truncateToWidth } from "@mariozechner/pi-tui";
-
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
 import type { SubagentType } from "../types.js";
+import { CARD_THEMES, formatElapsed, renderCard } from "../ui/tui-draw.js";
 
 // ---- Constants ----
 
@@ -178,7 +178,7 @@ function truncateLine(text: string, len = 60): string {
   if (line.length <= len) {
     return line;
   }
-  return line.slice(0, len) + "…";
+  return line.slice(0, len) + "...";
 }
 
 /** Build a human-readable activity string from currently-running tools or response text. */
@@ -203,23 +203,26 @@ export function describeActivity(
         parts.push(action);
       }
     }
-    return parts.join(", ") + "…";
+    return parts.join(", ") + "...";
   }
 
-  // No tools active — show truncated response text if available
+  // No tools active - show truncated response text if available
   if (responseText && responseText.trim().length > 0) {
     return truncateLine(responseText);
   }
 
-  return "thinking…";
+  return "thinking...";
 }
 
 // ---- Widget manager ----
+
+export type WidgetDisplayMode = "cards" | "tree";
 
 export class AgentWidget {
   private uiCtx: UICtx | undefined;
   private widgetFrame = 0;
   private widgetInterval: ReturnType<typeof setInterval> | undefined;
+  private displayMode: WidgetDisplayMode = "cards";
   /** Tracks how many turns each finished agent has survived. Key: agent ID, Value: turns since finished. */
   private finishedTurnAge = new Map<string, number>();
   /** How many extra turns errors/aborted agents linger (completed agents clear after 1 turn). */
@@ -233,6 +236,16 @@ export class AgentWidget {
   /** Set the UI context (grabbed from first tool execution). */
   setUICtx(ctx: UICtx) {
     this.uiCtx = ctx;
+  }
+
+  /** Toggle or set the running-agent display mode and force a widget refresh. */
+  setDisplayMode(mode: WidgetDisplayMode): void {
+    this.displayMode = mode;
+    this.update();
+  }
+
+  getDisplayMode(): WidgetDisplayMode {
+    return this.displayMode;
   }
 
   /**
@@ -269,6 +282,121 @@ export class AgentWidget {
     if (!this.finishedTurnAge.has(agentId)) {
       this.finishedTurnAge.set(agentId, 0);
     }
+  }
+
+  /** Render running agents as a card grid. */
+  private renderAgentCards(
+    running: Array<{
+      id: string;
+      type: SubagentType;
+      status: string;
+      description: string;
+      toolUses: number;
+      startedAt: number;
+      modelName?: string;
+      thinkingLevel?: string;
+    }>,
+    agentActivity: Map<string, AgentActivity>,
+    theme: Theme,
+    width: number
+  ): string[] {
+    if (running.length === 0) {
+      return [];
+    }
+
+    const cols = Math.max(1, Math.min(3, running.length));
+    const gap = 1;
+    const colWidth = Math.max(2, Math.floor((width - gap * (cols - 1)) / cols));
+    const phase = Math.floor((Date.now() / 2000) % 3);
+    const linesByCard: string[][] = [];
+
+    for (let i = 0; i < running.length; i++) {
+      const a = running[i];
+      const bg = agentActivity.get(a.id);
+      const activity = bg ? describeActivity(bg.activeTools, bg.responseText) : "thinking...";
+      const status = `⚡ working${".".repeat(phase + 1)}`;
+      const elapsed = formatElapsed(a.startedAt);
+      const name = getDisplayName(a.type);
+      const shortType = formatAgentConfigTag(a.modelName, a.thinkingLevel) ?? getPromptModeLabel(a.type) ?? name;
+      const card = renderCard({
+        title: a.description,
+        badge: `#${i + 1}`,
+        content: activity,
+        footer: `${status} ${elapsed}`,
+        footerRight: shortType,
+        colWidth,
+        theme,
+        cardTheme: CARD_THEMES[i % CARD_THEMES.length],
+      });
+      linesByCard.push(card);
+    }
+
+    const rows: string[] = [];
+    for (let i = 0; i < linesByCard.length; i += cols) {
+      const chunk = linesByCard.slice(i, i + cols);
+      const rowHeight = Math.max(...chunk.map((card) => card.length));
+      for (let lineIdx = 0; lineIdx < rowHeight; lineIdx++) {
+        const parts = chunk.map((card) => card[lineIdx] ?? " ".repeat(colWidth));
+        rows.push(parts.join(" ".repeat(gap)));
+      }
+    }
+    return rows;
+  }
+
+  /** Render running agents as two-line tree rows [header, activity] each. */
+  private renderTreeRunningLines(
+    running: Array<{
+      id: string;
+      type: SubagentType;
+      description: string;
+      toolUses: number;
+      startedAt: number;
+      modelName?: string;
+      thinkingLevel?: string;
+    }>,
+    agentActivity: Map<string, AgentActivity>,
+    theme: Theme,
+    frame: string,
+    truncate: (s: string) => string
+  ): string[][] {
+    const lines: string[][] = [];
+    for (const a of running) {
+      const name = getDisplayName(a.type);
+      const modeLabel = getPromptModeLabel(a.type);
+      const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
+      const elapsed = formatMs(Date.now() - a.startedAt);
+      const bg = agentActivity.get(a.id);
+      const toolUses = bg?.toolUses ?? a.toolUses;
+      let tokenText = "";
+      if (bg?.session) {
+        try {
+          tokenText = formatTokens(bg.session.getSessionStats().tokens.total);
+        } catch { /* best-effort */ }
+      }
+      const parts: string[] = [];
+      const turnCount = bg?.turnCount;
+      if (turnCount && turnCount > 0) {
+        parts.push(`turn ${turnCount}/${bg?.maxTurns}`);
+      }
+      if (toolUses > 0) {
+        parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
+      }
+      if (tokenText) { parts.push(tokenText); }
+      parts.push(elapsed);
+      const statsText = parts.join(" · ");
+      const activity = bg ? describeActivity(bg.activeTools, bg.responseText) : "thinking...";
+      const configTag = formatAgentConfigTag(a.modelName, a.thinkingLevel);
+      const configSuffix = configTag ? ` ${theme.fg("dim", `(${configTag})`)}` : "";
+      lines.push([
+        truncate(
+          `${theme.fg("dim", "├─")} ${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}${configSuffix}  ${theme.fg("muted", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", statsText)}`
+        ),
+        truncate(
+          `${theme.fg("dim", "│  ")}  ⎿  ${theme.fg("dim", activity)}`
+        ),
+      ]);
+    }
+    return lines;
   }
 
   /** Render a finished agent line. */
@@ -338,7 +466,7 @@ export class AgentWidget {
     const hasActive = running.length > 0 || queued.length > 0;
     const hasFinished = finished.length > 0;
 
-    // Nothing to show — clear widget
+    // Nothing to show - clear widget
     if (!(hasActive || hasFinished)) {
       this.uiCtx.setWidget("agents", undefined);
       this.uiCtx.setStatus("subagents", undefined);
@@ -392,9 +520,6 @@ export class AgentWidget {
         const headingColor = hasActive ? "accent" : "dim";
         const headingIcon = hasActive ? "●" : "○";
 
-        // Build sections separately for overflow-aware assembly.
-        // Each running agent = 2 lines (header + activity), finished = 1 line, queued = 1 line.
-
         const finishedLines: string[] = [];
         for (const a of finished) {
           finishedLines.push(
@@ -402,62 +527,6 @@ export class AgentWidget {
               theme.fg("dim", "├─") + " " + this.renderFinishedLine(a, theme)
             )
           );
-        }
-
-        const runningLines: string[][] = []; // each entry is [header, activity]
-        for (const a of running) {
-          const name = getDisplayName(a.type);
-          const modeLabel = getPromptModeLabel(a.type);
-          const modeTag = modeLabel
-            ? ` ${theme.fg("dim", `(${modeLabel})`)}`
-            : "";
-          const elapsed = formatMs(Date.now() - a.startedAt);
-
-          const bg = this.agentActivity.get(a.id);
-          const toolUses = bg?.toolUses ?? a.toolUses;
-          let tokenText = "";
-          if (bg?.session) {
-            try {
-              tokenText = formatTokens(
-                bg.session.getSessionStats().tokens.total
-              );
-            } catch {
-              /* */
-            }
-          }
-
-          const parts: string[] = [];
-          const turnCount = (bg as any)?.turns ?? (bg as any)?.turnCount;
-          if (turnCount > 0) {
-            parts.push(`turn ${turnCount}/${bg?.maxTurns}`);
-          }
-          if (toolUses > 0) {
-            parts.push(`${toolUses} tool use${toolUses === 1 ? "" : "s"}`);
-          }
-          if (tokenText) {
-            parts.push(tokenText);
-          }
-          parts.push(elapsed);
-          const statsText = parts.join(" · ");
-
-          const activity = bg
-            ? describeActivity(bg.activeTools, bg.responseText)
-            : "thinking…";
-
-          const configTag = formatAgentConfigTag(a.modelName, a.thinkingLevel);
-          const configSuffix = configTag
-            ? ` ${theme.fg("dim", `(${configTag})`)}`
-            : "";
-
-          runningLines.push([
-            truncate(
-              theme.fg("dim", "├─") +
-                ` ${theme.fg("accent", frame)} ${theme.bold(name)}${modeTag}${configSuffix}  ${theme.fg("muted", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", statsText)}`
-            ),
-            truncate(
-              theme.fg("dim", "│  ") + theme.fg("dim", `  ⎿  ${activity}`)
-            ),
-          ]);
         }
 
         const queuedLine =
@@ -468,91 +537,78 @@ export class AgentWidget {
               )
             : undefined;
 
-        // Assemble with overflow cap (heading + overflow indicator = 2 reserved lines).
-        const maxBody = MAX_WIDGET_LINES - 1; // heading takes 1 line
-        const totalBody =
-          finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
-
         const lines: string[] = [
           truncate(
-            theme.fg(headingColor, headingIcon) +
-              " " +
-              theme.fg(headingColor, "Agents")
+            `${theme.fg(headingColor, headingIcon)} ${theme.fg(headingColor, "Agents")}`
           ),
         ];
 
-        if (totalBody <= maxBody) {
-          // Everything fits — add all lines and fix up connectors for the last item.
-          lines.push(...finishedLines);
-          for (const pair of runningLines) {
-            lines.push(...pair);
-          }
-          if (queuedLine) {
-            lines.push(queuedLine);
-          }
+        const maxBody = MAX_WIDGET_LINES - 1;
 
-          // Fix last connector: swap ├─ → └─ and │ → space for activity lines.
-          if (lines.length > 1) {
-            const last = lines.length - 1;
-            lines[last] = lines[last].replace("├─", "└─");
-            // If last item is a running agent activity line, fix indent of that line
-            // and fix the header line above it.
-            if (runningLines.length > 0 && !queuedLine) {
-              // The last two lines are the last running agent's header + activity.
-              if (last >= 2) {
-                lines[last - 1] = lines[last - 1].replace("├─", "└─");
-                lines[last] = lines[last].replace("│  ", "   ");
-              }
+        if (this.displayMode === "cards") {
+          // Cards mode: running agents as colored card grid, finished as tree rows below
+          const runningCards = this.renderAgentCards(running, this.agentActivity, theme, w);
+          const bodyLines = running.length > 0
+            ? [...runningCards, ...finishedLines]
+            : [...finishedLines, ...(queuedLine ? [queuedLine] : [])];
+
+          if (bodyLines.length <= maxBody) {
+            lines.push(...bodyLines);
+            if (lines.length > 1) {
+              lines[lines.length - 1] = lines[lines.length - 1].replace("├─", "└─");
             }
+          } else {
+            let budget = maxBody - 1;
+            let hiddenCount = 0;
+            for (const line of bodyLines) {
+              if (budget >= 1) { lines.push(line); budget--; }
+              else { hiddenCount++; }
+            }
+            lines.push(truncate(`${theme.fg("dim", "└─")} ${theme.fg("dim", `+${hiddenCount} more`)}` ));
           }
         } else {
-          // Overflow — prioritize: running > queued > finished.
-          // Reserve 1 line for overflow indicator.
-          let budget = maxBody - 1;
-          let hiddenRunning = 0;
-          let hiddenFinished = 0;
-
-          // 1. Running agents (2 lines each)
-          for (const pair of runningLines) {
-            if (budget >= 2) {
-              lines.push(...pair);
-              budget -= 2;
-            } else {
-              hiddenRunning++;
-            }
-          }
-
-          // 2. Queued line
-          if (queuedLine && budget >= 1) {
-            lines.push(queuedLine);
-            budget--;
-          }
-
-          // 3. Finished agents
-          for (const fl of finishedLines) {
-            if (budget >= 1) {
-              lines.push(fl);
-              budget--;
-            } else {
-              hiddenFinished++;
-            }
-          }
-
-          // Overflow summary
-          const overflowParts: string[] = [];
-          if (hiddenRunning > 0) {
-            overflowParts.push(`${hiddenRunning} running`);
-          }
-          if (hiddenFinished > 0) {
-            overflowParts.push(`${hiddenFinished} finished`);
-          }
-          const overflowText = overflowParts.join(", ");
-          lines.push(
-            truncate(
-              theme.fg("dim", "└─") +
-                ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`
-            )
+          // Tree mode: running agents as two-line spinner rows
+          const runningLines = this.renderTreeRunningLines(
+            running, this.agentActivity, theme, frame, truncate
           );
+          const flatRunning = runningLines.flat();
+          const bodyLines = running.length > 0
+            ? [...flatRunning, ...finishedLines]
+            : [...finishedLines, ...(queuedLine ? [queuedLine] : [])];
+
+          if (bodyLines.length <= maxBody) {
+            lines.push(...bodyLines);
+            if (lines.length > 1) {
+              lines[lines.length - 1] = lines[lines.length - 1].replace("├─", "└─");
+              // Fix activity indent when last item is a running agent
+              if (running.length > 0 && !queuedLine && finishedLines.length === 0 && lines.length >= 3) {
+                lines[lines.length - 2] = lines[lines.length - 2].replace("├─", "└─");
+                lines[lines.length - 1] = lines[lines.length - 1].replace("│  ", "   ");
+              }
+            }
+          } else {
+            let budget = maxBody - 1;
+            let hiddenRunning = 0;
+            let hiddenFinished = 0;
+            let hiddenQueued = 0;
+            for (const pair of runningLines) {
+              if (budget >= 2) { lines.push(...pair); budget -= 2; }
+              else { hiddenRunning++; }
+            }
+            if (!running.length && queuedLine && budget >= 1) { lines.push(queuedLine); budget--; }
+            else if (!running.length && queuedLine) { hiddenQueued++; }
+            for (const fl of finishedLines) {
+              if (budget >= 1) { lines.push(fl); budget--; }
+              else { hiddenFinished++; }
+            }
+            const overflowParts: string[] = [];
+            if (hiddenRunning > 0) { overflowParts.push(`${hiddenRunning} running`); }
+            if (hiddenQueued > 0) { overflowParts.push(`${hiddenQueued} queued`); }
+            if (hiddenFinished > 0) { overflowParts.push(`${hiddenFinished} finished`); }
+            lines.push(truncate(
+              `${theme.fg("dim", "└─")} ${theme.fg("dim", `+${hiddenRunning + hiddenQueued + hiddenFinished} more (${overflowParts.join(", ")})`)}` 
+            ));
+          }
         }
 
         return {
@@ -560,7 +616,7 @@ export class AgentWidget {
             if (renderWidth == null || renderWidth >= w) {
               return lines;
             }
-            // Terminal narrowed since lines were built — re-truncate to avoid TUI crash
+            // Terminal narrowed since lines were built - re-truncate to avoid TUI crash
             return lines.map((line) => truncateToWidth(line, renderWidth));
           },
           invalidate: () => {},

@@ -72,7 +72,7 @@ describe("AgentWidget", () => {
       { terminal: { columns: 200 } },
       theme
     ).render();
-    expect(rendered[1]).toContain("haiku:high");
+    expect(rendered.some((line) => line.includes("haiku:high"))).toBe(true);
 
     vi.useRealTimers();
   });

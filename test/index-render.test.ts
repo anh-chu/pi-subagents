@@ -19,6 +19,7 @@ function createMockPi() {
   const pi = {
     registerTool: (tool: RegisteredTool) => { tools.push(tool); },
     registerCommand: () => {},
+    registerShortcut: () => {},
     registerMessageRenderer: () => {},
     on: (event: string, handler: (...args: any[]) => any) => {
       const list = handlers.get(event) ?? [];

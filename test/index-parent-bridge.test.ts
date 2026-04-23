@@ -30,6 +30,7 @@ function setupExtension() {
 
   const pi = {
     registerCommand: vi.fn(),
+    registerShortcut: vi.fn(),
     registerTool: vi.fn((tool: RegisteredTool) => {
       tools.set(tool.name, tool);
     }),
