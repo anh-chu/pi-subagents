@@ -243,8 +243,9 @@ export class AgentManager {
       },
     })
       .then(({ responseText, session, aborted, steered }) => {
-        // Don't overwrite status if externally stopped via abort()
-        if (record.status !== "stopped") {
+        if (record.stopRequested || record.status === "stopped") {
+          record.status = "stopped";
+        } else {
           record.status = aborted
             ? "aborted"
             : steered
@@ -254,6 +255,7 @@ export class AgentManager {
         record.result = responseText;
         record.session = session;
         record.completedAt ??= Date.now();
+        record.stopRequested = false;
         this.disposeBridgeState(id, `Agent ${id} ${record.status}.`);
 
         // Final flush of streaming output file
@@ -289,12 +291,14 @@ export class AgentManager {
         return responseText;
       })
       .catch((err) => {
-        // Don't overwrite status if externally stopped via abort()
-        if (record.status !== "stopped") {
+        if (record.stopRequested || record.status === "stopped") {
+          record.status = "stopped";
+        } else {
           record.status = "error";
         }
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt ??= Date.now();
+        record.stopRequested = false;
         this.disposeBridgeState(id, `Agent ${id} ${record.status}.`);
 
         // Final flush of streaming output file on error
@@ -362,15 +366,36 @@ export class AgentManager {
     ctx: ExtensionContext,
     type: SubagentType,
     prompt: string,
-    options: Omit<SpawnOptions, "isBackground">
+    options: Omit<SpawnOptions, "isBackground">,
+    signal?: AbortSignal
   ): Promise<AgentRecord> {
+    if (signal?.aborted) {
+      return {
+        id: String(this.nextId++),
+        type,
+        description: options.description,
+        status: "stopped",
+        toolUses: 0,
+        startedAt: Date.now(),
+        completedAt: Date.now(),
+      };
+    }
+
     const id = this.spawn(pi, ctx, type, prompt, {
       ...options,
       isBackground: false,
     });
     const record = this.agents.get(id)!;
-    await record.promise;
-    return record;
+
+    const onAbort = () => this.abort(id);
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    try {
+      await record.promise;
+      return record;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   /**
@@ -433,6 +458,7 @@ export class AgentManager {
     if (record.status === "queued") {
       this.queue = this.queue.filter((q) => q.id !== id);
       this.disposeBridgeState(id, `Agent ${id} removed from queue.`);
+      record.stopRequested = false;
       record.status = "stopped";
       record.completedAt = Date.now();
       return true;
@@ -441,10 +467,9 @@ export class AgentManager {
     if (record.status !== "running") {
       return false;
     }
+    record.stopRequested = true;
     record.abortController?.abort();
-    this.disposeBridgeState(id, `Agent ${id} stopped.`);
-    record.status = "stopped";
-    record.completedAt = Date.now();
+    this.disposeBridgeState(id, `Agent ${id} stopping.`);
     return true;
   }
 
@@ -513,10 +538,9 @@ export class AgentManager {
     // Abort running agents
     for (const [id, record] of this.agents) {
       if (record.status === "running") {
+        record.stopRequested = true;
         record.abortController?.abort();
-        this.disposeBridgeState(id, `Agent ${id} stopped.`);
-        record.status = "stopped";
-        record.completedAt = Date.now();
+        this.disposeBridgeState(id, `Agent ${id} stopping.`);
         count++;
       }
     }
@@ -530,7 +554,11 @@ export class AgentManager {
     while (true) {
       this.drainQueue();
       const pending = [...this.agents.values()]
-        .filter((r) => r.status === "running" || r.status === "queued")
+        .filter(
+          (r) =>
+            (r.status === "running" && !r.stopRequested) ||
+            r.status === "queued"
+        )
         .map((r) => r.promise)
         .filter(Boolean);
       if (pending.length === 0) {

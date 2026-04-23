@@ -27,8 +27,11 @@
   - [`de9c113`](https://github.com/elidickinson/pi-subagents/commit/de9c113d2ced9502dc5d19fb9019b4fce62e5687), add group-join regression tests + vitest config.
   - [`4c18030`](https://github.com/elidickinson/pi-subagents/commit/4c180303f936bce70de0fa35412c581b8479fb5a), sequential numeric agent IDs.
   - Adapted from [`7059402`](https://github.com/elidickinson/pi-subagents/commit/7059402b1ebf1a593bf609c5b08c9ec8856af32e) + [`fa093c1`](https://github.com/elidickinson/pi-subagents/commit/fa093c1781a10bf39c094f217c8fc4a96ee24ad8), `send_message` compatibility alias integrated on top of parent-bridge (`message_parent`) flow.
+  - Adapted from [`03b0b20`](https://github.com/elidickinson/pi-subagents/commit/03b0b209343a422f7f471695f1f06f6044f8c8e8), suppress stale post-consumption messaging and notification races.
+  - Adapted from [`bc21590`](https://github.com/Evizero/pi-subagents/commit/bc21590b9c2ca20020e2661041600843a2ccd99f), stop/cancel hardening subset (without full runtime/session rewire).
 - From `Evizero/custom` (targeted partial port)
   - Adapted from [`f4ae45c`](https://github.com/Evizero/pi-subagents/commit/f4ae45c85ab9f30ca27061bbef87a96bf0923b30), ignore lifecycle/UI events from ephemeral in-memory child contexts.
+  - Adapted from [`f9118b9`](https://github.com/Evizero/pi-subagents/commit/f9118b9058e8b7bc384b406e87a17004f2981b91) + [`60f2d8e`](https://github.com/Evizero/pi-subagents/commit/60f2d8ee0dd62d7f58fe374d8ca051d2c67bbf51), improved result preview rendering plus renderer regression tests.
 
 ### Imported from fork commit `b9cc2da`
 

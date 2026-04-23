@@ -252,6 +252,73 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+const COLLAPSED_TOOL_RESULT_PREVIEW_MAX_LINES = 30;
+const COLLAPSED_TOOL_RESULT_PREVIEW_MAX_CHARS = 1200;
+const EXPANDED_TOOL_RESULT_PREVIEW_MAX_LINES = 500;
+const EXPANDED_TOOL_RESULT_PREVIEW_MAX_CHARS = 60_000;
+
+/** Truncate long previews without scanning the full result unless the bounded preview already includes it. */
+function truncatePreview(
+  text: string,
+  maxLines = 500,
+  includeGetResultHint = true,
+  maxChars = 6000
+): string {
+  let linesSeen = 1;
+  let searchFrom = 0;
+  let previewEnd = text.length;
+  let hasAdditionalLines = false;
+
+  while (linesSeen <= maxLines) {
+    const newlineIndex = text.indexOf("\n", searchFrom);
+    if (newlineIndex === -1) {
+      break;
+    }
+    searchFrom = newlineIndex + 1;
+    linesSeen++;
+  }
+
+  if (linesSeen > maxLines) {
+    hasAdditionalLines = true;
+    previewEnd = searchFrom - 1;
+  }
+
+  const previewCandidate = text.slice(0, previewEnd);
+  let preview = previewCandidate;
+  let truncatedChars = 0;
+
+  if (preview.length > maxChars) {
+    truncatedChars = preview.length - maxChars;
+    preview = preview.slice(0, maxChars);
+  }
+
+  if (!hasAdditionalLines && truncatedChars === 0) {
+    return text;
+  }
+
+  const visibleLines = preview.split("\n").length;
+  const notes: string[] = [];
+  if (hasAdditionalLines) {
+    if (text.length <= maxChars) {
+      const totalLines = text.split("\n").length;
+      notes.push(`${totalLines - maxLines} more lines truncated`);
+    } else {
+      notes.push("more lines truncated");
+    }
+  }
+  if (truncatedChars > 0) {
+    notes.push(`${truncatedChars} more characters truncated`);
+  }
+  if (!hasAdditionalLines && truncatedChars > 0) {
+    notes.push(`${visibleLines} line${visibleLines === 1 ? "" : "s"} shown`);
+  }
+
+  const hint = includeGetResultHint
+    ? " Use get_subagent_result for full output."
+    : "";
+  return `${preview}\n... (${notes.join(", ")}.${hint})`;
+}
+
 /** Format a structured task notification matching Claude Code's <task-notification> XML. */
 function formatTaskNotification(
   record: AgentRecord,
@@ -1109,26 +1176,37 @@ Guidelines:
         let line = icon + (s ? " " + s : "");
         line += " " + theme.fg("dim", "·") + " " + theme.fg("dim", duration);
 
+        const resultText =
+          result.content[0]?.type === "text" ? result.content[0].text : "";
         if (expanded) {
-          const resultText =
-            result.content[0]?.type === "text" ? result.content[0].text : "";
           if (resultText) {
-            const lines = resultText.split("\n").slice(0, 50);
-            for (const l of lines) {
-              line += "\n" + theme.fg("dim", `  ${l}`);
-            }
-            if (resultText.split("\n").length > 50) {
-              line +=
-                "\n" +
-                theme.fg(
-                  "muted",
-                  "  ... (use get_subagent_result with verbose for full output)"
-                );
+            const preview = truncatePreview(
+              resultText,
+              EXPANDED_TOOL_RESULT_PREVIEW_MAX_LINES,
+              false,
+              EXPANDED_TOOL_RESULT_PREVIEW_MAX_CHARS
+            );
+            for (const previewLine of preview.split("\n")) {
+              line += "\n" + theme.fg("dim", `  ${previewLine}`);
             }
           }
         } else {
           const doneText = isSteered ? "Wrapped up (turn limit)" : "Done";
           line += "\n" + theme.fg("dim", `  ⎿  ${doneText}`);
+
+          const preview = resultText
+            ? truncatePreview(
+                resultText,
+                COLLAPSED_TOOL_RESULT_PREVIEW_MAX_LINES,
+                false,
+                COLLAPSED_TOOL_RESULT_PREVIEW_MAX_CHARS
+              )
+            : "";
+          if (preview) {
+            for (const previewLine of preview.split("\n")) {
+              line += "\n" + theme.fg("dim", `  ${previewLine}`);
+            }
+          }
         }
         return new Text(line, 0, 0);
       }
@@ -1444,7 +1522,8 @@ Guidelines:
         thinkingLevel: thinking,
         isolation,
         ...fgCallbacks,
-      }
+      },
+      signal
     );
 
     clearInterval(spinnerInterval);
@@ -1471,6 +1550,10 @@ Guidelines:
         `${fallbackNote}Agent failed: ${record.error}`,
         details
       );
+    }
+
+    if (record.status === "stopped") {
+      return textResult(`${fallbackNote}Agent stopped by user.`, details);
     }
 
     const durationMs = (record.completedAt ?? Date.now()) - record.startedAt;
@@ -1535,14 +1618,17 @@ Guidelines:
       const toolStats = tokens
         ? `Tool uses: ${record.toolUses} | ${tokens}`
         : `Tool uses: ${record.toolUses}`;
+      const statusText = record.stopRequested ? "stopping" : record.status;
 
       let output =
         `Agent: ${record.id}\n` +
-        `Type: ${displayName} | Status: ${record.status} | ${toolStats} | Duration: ${duration}\n` +
+        `Type: ${displayName} | Status: ${statusText} | ${toolStats} | Duration: ${duration}\n` +
         `Description: ${record.description}\n\n`;
 
-      if (record.status === "running") {
+      if (record.status === "running" && !record.stopRequested) {
         output += "Agent is still running. Use wait: true or check back later.";
+      } else if (record.stopRequested) {
+        output += "Agent stop requested, waiting for cancellation to settle.";
       } else if (record.status === "error") {
         output += `Error: ${record.error}`;
       } else {
@@ -1669,9 +1755,10 @@ Guidelines:
           `Agent not found: "${params.agent_id}". It may have been cleaned up.`
         );
       }
-      if (record.status !== "running") {
+      if (record.status !== "running" || record.stopRequested) {
+        const statusText = record.stopRequested ? "stopping" : record.status;
         return textResult(
-          `Agent "${params.agent_id}" is not running (status: ${record.status}). Cannot steer a non-running agent.`
+          `Agent "${params.agent_id}" is not running (status: ${statusText}). Cannot steer a non-running agent.`
         );
       }
       if (!record.session) {

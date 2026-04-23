@@ -107,6 +107,57 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
 
     expect(onCompleteCalled).toBe(false);
   });
+
+  it("sets stopped after in-flight abort settles", async () => {
+    manager = new AgentManager();
+
+    vi.mocked(runAgent).mockImplementation(
+      (_, __, ___, options: any) =>
+        new Promise((resolve) => {
+          options.signal?.addEventListener("abort", () => {
+            resolve({
+              responseText: "",
+              session: mockSession(),
+              aborted: false,
+              steered: false,
+            });
+          });
+        })
+    );
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+    });
+
+    const record = manager.getRecord(id)!;
+    expect(record.status).toBe("running");
+
+    manager.abort(id);
+    expect(record.stopRequested).toBe(true);
+
+    await record.promise;
+
+    expect(record.status).toBe("stopped");
+    expect(record.stopRequested).toBe(false);
+  });
+
+  it("spawnAndWait returns stopped record when signal already aborted", async () => {
+    manager = new AgentManager();
+    const controller = new AbortController();
+    controller.abort();
+
+    const record = await manager.spawnAndWait(
+      mockPi,
+      mockCtx,
+      "general-purpose",
+      "test",
+      { description: "test" },
+      controller.signal
+    );
+
+    expect(record.status).toBe("stopped");
+  });
 });
 
 describe("AgentManager — Bug 3 clearCompleted", () => {
