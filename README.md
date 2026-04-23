@@ -1,74 +1,25 @@
 # @anh-chu/pi-subagents
 
-## Aggregated features and fixes, source of truth, credits
-
-- **Source-of-truth fork commit:** [`b9cc2dadc286204a32f8a1864c466ff4c7c0de10`](https://github.com/yzlin/pi-subagents/commit/b9cc2dadc286204a32f8a1864c466ff4c7c0de10) from `yzlin/master`.
-- **Integration rule:** discarded drifted hand patches, restored exact fork diff for target files, then fixed only test regressions.
-- **Current state:** partial multi-fork aggregation completed (high-value low-risk fixes merged), high-conflict feature waves still pending manual merge.
-- **Recent port:** ephemeral child session lifecycle guard integrated from Evizero ideas, without full runtime rewire.
-
-### Fork sources aggregated in this branch
-
-This branch aggregates work from these four fork branches:
-
-- [`elidickinson/pi-subagents:main`](https://github.com/tintinweb/pi-subagents/compare/master...elidickinson:pi-subagents:main) — **partially integrated**
-- [`mikeyobrien/pi-subagents-tintinweb:fix/isolate-agents-md-from-subagents`](https://github.com/tintinweb/pi-subagents/compare/master...mikeyobrien:pi-subagents-tintinweb:fix/isolate-agents-md-from-subagents) — **integrated**
-- [`yzlin/pi-subagents:master`](https://github.com/tintinweb/pi-subagents/compare/master...yzlin:pi-subagents:master) — **partially integrated** (primary source baseline)
-- [`Evizero/pi-subagents:custom`](https://github.com/tintinweb/pi-subagents/compare/master...Evizero:pi-subagents:custom) — **partially integrated**
-
-### Additional merged fork commits (wave 1)
-
-- From `mikeyobrien/fix-isolate`
-  - [`28f29a5`](https://github.com/mikeyobrien/pi-subagents-tintinweb/commit/28f29a53bce87123a770c9d3370e0393aa6dbd60), prevent `AGENTS.md` / `APPEND_SYSTEM.md` leakage into subagents.
-- From `elidickinson/main`
-  - [`537ca81`](https://github.com/elidickinson/pi-subagents/commit/537ca8142edea3ff83a500c90636fe656a744d5c), group-join double-delivery fix.
-  - [`03bbee0`](https://github.com/elidickinson/pi-subagents/commit/03bbee0ecd6cefaba1fe4bd097aa9115cb41476e), activity key collision fix.
-  - [`e7ef25c`](https://github.com/elidickinson/pi-subagents/commit/e7ef25c5156e1386fcbf101b1c8f9ddffaca2f6e), fuzzy model resolver crash fix.
-  - [`6123673`](https://github.com/elidickinson/pi-subagents/commit/6123673054d2bd535b264d35c253c441218df955), undefined `subagent_type` crash fix.
-  - [`04140b7`](https://github.com/elidickinson/pi-subagents/commit/04140b73aef457780d8b1b455659b67518752773), defensive bash message handling.
-  - [`ec0cdbd`](https://github.com/elidickinson/pi-subagents/commit/ec0cdbdc592bca3bb84fa0503acdb04199886d73), tool call display compatibility.
-  - [`b213ac5`](https://github.com/elidickinson/pi-subagents/commit/b213ac5606f4b39468b0cf0fe335518922fdd39d), foreground Esc/abort propagation fix.
-  - [`499343f`](https://github.com/elidickinson/pi-subagents/commit/499343fbf660a11da200a9020efba252637756d4), resource leak hardening on shutdown.
-  - [`d077c0c`](https://github.com/elidickinson/pi-subagents/commit/d077c0ce9dd9add3e7630ad18038f4e6cb35e742), cleanup window 10m → 1h.
-  - [`b750927`](https://github.com/elidickinson/pi-subagents/commit/b75092761ca7d6fc86ed1f1a9e02f7a60dbfbf2b), Explore inherits parent model by default.
-  - [`e53aae6`](https://github.com/elidickinson/pi-subagents/commit/e53aae6783af183548f4e749e7c3f148ec17ea44), allow `get_subagent_result(wait=true)` for queued agents.
-  - [`b62e939`](https://github.com/elidickinson/pi-subagents/commit/b62e939938496f42537f01fb8608f43866323bc3), cleanup timeout exposed in settings.
-  - [`de9c113`](https://github.com/elidickinson/pi-subagents/commit/de9c113d2ced9502dc5d19fb9019b4fce62e5687), add group-join regression tests + vitest config.
-  - [`4c18030`](https://github.com/elidickinson/pi-subagents/commit/4c180303f936bce70de0fa35412c581b8479fb5a), sequential numeric agent IDs.
-  - Adapted from [`7059402`](https://github.com/elidickinson/pi-subagents/commit/7059402b1ebf1a593bf609c5b08c9ec8856af32e) + [`fa093c1`](https://github.com/elidickinson/pi-subagents/commit/fa093c1781a10bf39c094f217c8fc4a96ee24ad8), `send_message` compatibility alias integrated on top of parent-bridge (`message_parent`) flow.
-  - Adapted from [`03b0b20`](https://github.com/elidickinson/pi-subagents/commit/03b0b209343a422f7f471695f1f06f6044f8c8e8), suppress stale post-consumption messaging and notification races.
-  - Adapted from [`bc21590`](https://github.com/Evizero/pi-subagents/commit/bc21590b9c2ca20020e2661041600843a2ccd99f), stop/cancel hardening subset (without full runtime/session rewire).
-- From `Evizero/custom` (targeted partial port)
-  - Adapted from [`f4ae45c`](https://github.com/Evizero/pi-subagents/commit/f4ae45c85ab9f30ca27061bbef87a96bf0923b30), ignore lifecycle/UI events from ephemeral in-memory child contexts.
-  - Adapted from [`f9118b9`](https://github.com/Evizero/pi-subagents/commit/f9118b9058e8b7bc384b406e87a17004f2981b91) + [`60f2d8e`](https://github.com/Evizero/pi-subagents/commit/60f2d8ee0dd62d7f58fe374d8ca051d2c67bbf51), improved result preview rendering plus renderer regression tests.
-  - Adapted from [`153595b`](https://github.com/Evizero/pi-subagents/commit/153595b9fda993d82ac0a2d719793efe07cac8a4), tool-selection hardening: add name-only query functions, switch getToolsForType to return names for session tool resolution.
-
-### Imported from fork commit `b9cc2da`
-
-- **Parent↔subagent bridge messaging/replies** via new [`src/parent-bridge.ts`](./src/parent-bridge.ts)
-- Runtime wiring updates in [`src/index.ts`](./src/index.ts), [`src/agent-runner.ts`](./src/agent-runner.ts), [`src/agent-manager.ts`](./src/agent-manager.ts)
-- UI/UX updates in [`src/ui/conversation-viewer.ts`](./src/ui/conversation-viewer.ts), [`src/ui/conversation-viewer.test.ts`](./src/ui/conversation-viewer.test.ts)
-- Bridge test coverage added in:
-  - [`test/parent-bridge.test.ts`](./test/parent-bridge.test.ts)
-  - [`test/index-parent-bridge.test.ts`](./test/index-parent-bridge.test.ts)
-  - [`test/agent-manager-parent-bridge.test.ts`](./test/agent-manager-parent-bridge.test.ts)
-  - plus updates in [`test/agent-runner.test.ts`](./test/agent-runner.test.ts)
-
-### Regression fixes after fork sync (local)
-
-- Guard RPC registration when `pi.events.on` missing in [`src/index.ts`](./src/index.ts), fixes session lifecycle test runtime mismatch.
-- Restore/export `formatAgentConfigTag`, show model/thinking tag in status + widget line, and support `turns`/`turnCount` compatibility in [`src/ui/agent-widget.ts`](./src/ui/agent-widget.ts).
-
-### Credits
-
-- **Original project:** [tintinweb](https://github.com/tintinweb), `@tintinweb/pi-subagents`
-- **Major fork features used here:** [yzlin](https://github.com/yzlin), commit [`b9cc2da`](https://github.com/yzlin/pi-subagents/commit/b9cc2dadc286204a32f8a1864c466ff4c7c0de10)
-- **This integration branch:** applied fork diff as canonical baseline, added minimal regression-only fixes to keep full suite green.
-
 A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-agents** to pi. Spawn specialized agents that run in isolated sessions — each with its own tools, system prompt, model, and thinking level. Run them in foreground or background, steer them mid-run, resume completed sessions, and define your own custom agent types.
 
 > **Status:** Early release.
-> **Credit:** Forked from the original `@tintinweb/pi-subagents` work by [tintinweb](https://github.com/tintinweb).
+> **Forked from** [`@tintinweb/pi-subagents`](https://github.com/tintinweb/pi-subagents) with significant additions — see below.
+
+## What this adds over `@tintinweb/pi-subagents`
+
+- **Parent↔subagent bridge** — subagents get native `message_parent` and `ask_parent` tools. The parent replies with `reply_to_subagent` and fetches queued payloads with `get_subagent_message`. Messages are session-scoped and queue-first.
+- **Session scoping** — agents are bound to the session that spawned them. After `/new` or a session switch, prior-session agents no longer fire notifications into the new session.
+- **AGENTS.md / APPEND_SYSTEM.md isolation** — these files are never leaked into subagent prompts, regardless of prompt mode or parent context.
+- **Nested subagent prompt hygiene** — stale `<sub_agent_context>` and `<runtime_truth>` blocks are stripped from inherited parent prompts before re-injection, preventing prompt pollution in agent chains.
+- **Hardened tool selection** — tool names are resolved at session creation time. Extension allowlists, EXCLUDED_TOOL_NAMES, and disallowedTools are all applied before the session starts, not after.
+- **Stop/cancel hardening** — `stopRequested` flag prevents phantom `stopped` statuses; background concurrency slot is released exactly once via `backgroundSlotReleased` guard.
+- **`send_message` alias** — compatibility alias for `message_parent` so agents expecting either name work without changes.
+- **Stale notification suppression** — post-consumption messages and completion nudges are dropped after `get_subagent_result` has already consumed the result.
+- **Result preview rendering** — background agent completions render a capped, safe preview instead of raw output.
+- **Sequential numeric agent IDs** — agents get IDs like `1`, `2`, `3` instead of random strings, making logs and references easier to read.
+- **`get_subagent_result(wait=true)`** — can await queued (not yet started) agents in addition to running ones.
+- **Fuzzy model selection and crash guards** — unknown model strings and undefined `subagent_type` values are handled gracefully instead of crashing.
+- **Ephemeral child session guard** — lifecycle/UI events from in-memory child sessions are ignored so they don't interfere with the parent session state.
 
 <img width="600" alt="pi-subagents screenshot" src="https://github.com/anh-chu/pi-subagents/raw/master/media/screenshot.png" />
 
@@ -554,3 +505,19 @@ src/
 MIT.
 
 Fork attribution: original package by [tintinweb](https://github.com/tintinweb).
+
+---
+
+<details>
+<summary>Fork aggregation ledger (sources and credits)</summary>
+
+This package aggregates improvements from four community forks of `@tintinweb/pi-subagents`:
+
+- [`yzlin/pi-subagents:master`](https://github.com/yzlin/pi-subagents) — primary baseline (commit [`b9cc2da`](https://github.com/yzlin/pi-subagents/commit/b9cc2dadc286204a32f8a1864c466ff4c7c0de10)): parent-bridge foundation, bridge tests, pi 0.68.x compatibility
+- [`elidickinson/pi-subagents:main`](https://github.com/elidickinson/pi-subagents) — stability fixes: group-join double-delivery, activity key collision, model resolver crash, queued-agent wait, sequential IDs, send_message alias, stale notification suppression
+- [`mikeyobrien/pi-subagents-tintinweb:fix/isolate-agents-md-from-subagents`](https://github.com/mikeyobrien/pi-subagents-tintinweb) — AGENTS.md / APPEND_SYSTEM.md isolation
+- [`Evizero/pi-subagents:custom`](https://github.com/Evizero/pi-subagents) — ephemeral session guard, stop/cancel hardening, result preview rendering, tool-selection hardening, session scoping, nested prompt normalization
+
+Original project by [tintinweb](https://github.com/tintinweb).
+
+</details>
