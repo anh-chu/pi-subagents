@@ -219,6 +219,7 @@ export class AgentManager {
       isolated: options.isolated,
       inheritContext: options.inheritContext,
       thinkingLevel: options.thinkingLevel,
+      isResultConsumed: () => !!record.resultConsumed,
       cwd: worktreeCwd,
       signal: record.abortController!.signal,
       onToolActivity: (activity) => {

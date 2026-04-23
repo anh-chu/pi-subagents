@@ -262,6 +262,40 @@ describe("agent-runner final output capture", () => {
     ]);
   });
 
+  it("send_message suppresses delivery after result consumed", async () => {
+    const { session } = createSession("BRIDGED");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "Send alias update", {
+      pi,
+      agentId: "agent-123",
+      isResultConsumed: () => true,
+    });
+
+    const sessionOptions = createAgentSession.mock.calls[0][0] as {
+      tools: Array<{
+        name: string;
+        execute: (toolCallId: string, params: unknown) => Promise<any>;
+      }>;
+    };
+    const sendMessageTool = sessionOptions.tools.find(
+      (tool) => tool.name === "send_message"
+    );
+
+    const result = await sendMessageTool!.execute("tool-call-1", {
+      message: "Too late",
+    });
+    const queued = parentBridge.drainMessages("agent-123");
+
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: "Message suppressed, parent already consumed result.",
+      },
+    ]);
+    expect(queued).toEqual([]);
+  });
+
   it("ask_parent queues a request and resolves with the parent reply", async () => {
     const { session } = createSession("BRIDGED");
     createAgentSession.mockResolvedValue({ session });

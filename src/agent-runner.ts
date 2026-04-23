@@ -123,6 +123,8 @@ export interface RunOptions {
   parentSessionId?: string;
   /** Whether the subagent may block on ask_parent. */
   allowAskParent?: boolean;
+  /** Suppress one-way parent messages once parent consumed result. */
+  isResultConsumed?: () => boolean;
   model?: Model<any>;
   maxTurns?: number;
   signal?: AbortSignal;
@@ -203,9 +205,22 @@ function forwardAbortSignal(
 function createParentBridgeTools(
   agentId: string,
   parentSessionId = DEFAULT_PARENT_SESSION_ID,
-  allowAskParent = true
+  allowAskParent = true,
+  isResultConsumed?: () => boolean
 ) {
   const queueMessageForParent = (message: string) => {
+    if (isResultConsumed?.()) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "Message suppressed, parent already consumed result.",
+          },
+        ],
+        details: {},
+      };
+    }
+
     const queued = parentBridge.messageParent(agentId, message, {
       sessionId: parentSessionId,
     });
@@ -331,7 +346,8 @@ export async function runAgent(
       ...createParentBridgeTools(
         options.agentId,
         options.parentSessionId,
-        options.allowAskParent
+        options.allowAskParent,
+        options.isResultConsumed
       ),
     ];
   }
