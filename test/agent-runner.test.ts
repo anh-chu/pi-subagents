@@ -6,8 +6,34 @@ const { createAgentSession } = vi.hoisted(() => ({
 
 vi.mock("@mariozechner/pi-coding-agent", () => ({
   createAgentSession,
+  getAgentDir: vi.fn(() => "/tmp/.pi/agent"),
   DefaultResourceLoader: class {
     async reload() {}
+    getExtensions() {
+      return { extensions: [], runtime: {} };
+    }
+    getSkills() {
+      return { skills: [], diagnostics: [] };
+    }
+    getPrompts() {
+      return { prompts: [], diagnostics: [] };
+    }
+    getThemes() {
+      return { themes: [], diagnostics: [] };
+    }
+    getAgentsFiles() {
+      return { agentsFiles: [] };
+    }
+    getSystemPrompt() {
+      return "";
+    }
+    getAppendSystemPrompt() {
+      return [];
+    }
+    getPathMetadata() {
+      return new Map();
+    }
+    extendResources(_paths: unknown) {}
   },
   SessionManager: {
     inMemory: vi.fn(() => ({ kind: "memory-session-manager" })),
@@ -42,7 +68,10 @@ vi.mock("../src/agent-types.js", () => ({
   getAgentConfig: vi.fn(() => DEFAULT_AGENT_CONFIG),
   getMemoryTools: vi.fn(() => []),
   getReadOnlyMemoryTools: vi.fn(() => []),
+  getMemoryToolNames: vi.fn(() => []),
+  getReadOnlyMemoryToolNames: vi.fn(() => []),
   getToolsForType: vi.fn(() => [{ name: "read" }]),
+  getToolNamesForType: vi.fn(() => ["read"]),
 }));
 
 vi.mock("../src/env.js", () => ({
@@ -87,6 +116,9 @@ function createSession(finalText: string) {
     abort: vi.fn(),
     steer: vi.fn(),
     getActiveToolNames: vi.fn(() => ["read"]),
+    getAllTools: vi.fn(() => [
+      { name: "read", sourceInfo: { source: "builtin" } },
+    ]),
     setActiveToolsByName: vi.fn(),
     bindExtensions: vi.fn(async () => {}),
   };
@@ -167,9 +199,12 @@ describe("agent-runner final output capture", () => {
     await runAgent(ctx, "Explore", "Say BRIDGED", { pi, agentId: "agent-123" });
 
     const sessionOptions = createAgentSession.mock.calls[0][0] as {
-      tools: Array<{ name: string }>;
+      tools: Array<{ name: string } | string>;
     };
-    expect(sessionOptions.tools.map((tool) => tool.name)).toEqual(
+    const toolNames = sessionOptions.tools.map((t) =>
+      typeof t === "string" ? t : t.name
+    );
+    expect(toolNames).toEqual(
       expect.arrayContaining([
         "read",
         "message_parent",
