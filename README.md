@@ -7,6 +7,15 @@
 - **Current state:** partial multi-fork aggregation completed (high-value low-risk fixes merged), high-conflict feature waves still pending manual merge.
 - **Recent port:** ephemeral child session lifecycle guard integrated from Evizero ideas, without full runtime rewire.
 
+### Fork sources aggregated in this branch
+
+This branch aggregates work from these four fork branches:
+
+- [`elidickinson/pi-subagents:main`](https://github.com/tintinweb/pi-subagents/compare/master...elidickinson:pi-subagents:main) — **partially integrated**
+- [`mikeyobrien/pi-subagents-tintinweb:fix/isolate-agents-md-from-subagents`](https://github.com/tintinweb/pi-subagents/compare/master...mikeyobrien:pi-subagents-tintinweb:fix/isolate-agents-md-from-subagents) — **integrated**
+- [`yzlin/pi-subagents:master`](https://github.com/tintinweb/pi-subagents/compare/master...yzlin:pi-subagents:master) — **partially integrated** (primary source baseline)
+- [`Evizero/pi-subagents:custom`](https://github.com/tintinweb/pi-subagents/compare/master...Evizero:pi-subagents:custom) — **partially integrated**
+
 ### Additional merged fork commits (wave 1)
 
 - From `mikeyobrien/fix-isolate`
