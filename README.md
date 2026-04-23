@@ -4,6 +4,23 @@
 
 - **Source-of-truth fork commit:** [`b9cc2dadc286204a32f8a1864c466ff4c7c0de10`](https://github.com/yzlin/pi-subagents/commit/b9cc2dadc286204a32f8a1864c466ff4c7c0de10) from `yzlin/master`.
 - **Integration rule:** discarded drifted hand patches, restored exact fork diff for target files, then fixed only test regressions.
+- **Current state:** partial multi-fork aggregation completed (high-value low-risk fixes merged), high-conflict feature waves still pending manual merge.
+
+### Additional merged fork commits (wave 1)
+
+- From `mikeyobrien/fix-isolate`
+  - [`28f29a5`](https://github.com/mikeyobrien/pi-subagents-tintinweb/commit/28f29a53bce87123a770c9d3370e0393aa6dbd60), prevent `AGENTS.md` / `APPEND_SYSTEM.md` leakage into subagents.
+- From `elidickinson/main`
+  - [`537ca81`](https://github.com/elidickinson/pi-subagents/commit/537ca8142edea3ff83a500c90636fe656a744d5c), group-join double-delivery fix.
+  - [`03bbee0`](https://github.com/elidickinson/pi-subagents/commit/03bbee0ecd6cefaba1fe4bd097aa9115cb41476e), activity key collision fix.
+  - [`e7ef25c`](https://github.com/elidickinson/pi-subagents/commit/e7ef25c5156e1386fcbf101b1c8f9ddffaca2f6e), fuzzy model resolver crash fix.
+  - [`6123673`](https://github.com/elidickinson/pi-subagents/commit/6123673054d2bd535b264d35c253c441218df955), undefined `subagent_type` crash fix.
+  - [`04140b7`](https://github.com/elidickinson/pi-subagents/commit/04140b73aef457780d8b1b455659b67518752773), defensive bash message handling.
+  - [`ec0cdbd`](https://github.com/elidickinson/pi-subagents/commit/ec0cdbdc592bca3bb84fa0503acdb04199886d73), tool call display compatibility.
+  - [`b213ac5`](https://github.com/elidickinson/pi-subagents/commit/b213ac5606f4b39468b0cf0fe335518922fdd39d), foreground Esc/abort propagation fix.
+  - [`499343f`](https://github.com/elidickinson/pi-subagents/commit/499343fbf660a11da200a9020efba252637756d4), resource leak hardening on shutdown.
+  - [`d077c0c`](https://github.com/elidickinson/pi-subagents/commit/d077c0ce9dd9add3e7630ad18038f4e6cb35e742), cleanup window 10m → 1h.
+  - [`b750927`](https://github.com/elidickinson/pi-subagents/commit/b75092761ca7d6fc86ed1f1a9e02f7a60dbfbf2b), Explore inherits parent model by default.
 
 ### Imported from fork commit `b9cc2da`
 
