@@ -25,6 +25,7 @@
   - [`b62e939`](https://github.com/elidickinson/pi-subagents/commit/b62e939938496f42537f01fb8608f43866323bc3), cleanup timeout exposed in settings.
   - [`de9c113`](https://github.com/elidickinson/pi-subagents/commit/de9c113d2ced9502dc5d19fb9019b4fce62e5687), add group-join regression tests + vitest config.
   - [`4c18030`](https://github.com/elidickinson/pi-subagents/commit/4c180303f936bce70de0fa35412c581b8479fb5a), sequential numeric agent IDs.
+  - Adapted from [`7059402`](https://github.com/elidickinson/pi-subagents/commit/7059402b1ebf1a593bf609c5b08c9ec8856af32e) + [`fa093c1`](https://github.com/elidickinson/pi-subagents/commit/fa093c1781a10bf39c094f217c8fc4a96ee24ad8), `send_message` compatibility alias integrated on top of parent-bridge (`message_parent`) flow.
 
 ### Imported from fork commit `b9cc2da`
 
