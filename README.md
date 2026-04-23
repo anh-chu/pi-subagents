@@ -5,6 +5,7 @@
 - **Source-of-truth fork commit:** [`b9cc2dadc286204a32f8a1864c466ff4c7c0de10`](https://github.com/yzlin/pi-subagents/commit/b9cc2dadc286204a32f8a1864c466ff4c7c0de10) from `yzlin/master`.
 - **Integration rule:** discarded drifted hand patches, restored exact fork diff for target files, then fixed only test regressions.
 - **Current state:** partial multi-fork aggregation completed (high-value low-risk fixes merged), high-conflict feature waves still pending manual merge.
+- **Recent port:** ephemeral child session lifecycle guard integrated from Evizero ideas, without full runtime rewire.
 
 ### Additional merged fork commits (wave 1)
 
@@ -26,6 +27,8 @@
   - [`de9c113`](https://github.com/elidickinson/pi-subagents/commit/de9c113d2ced9502dc5d19fb9019b4fce62e5687), add group-join regression tests + vitest config.
   - [`4c18030`](https://github.com/elidickinson/pi-subagents/commit/4c180303f936bce70de0fa35412c581b8479fb5a), sequential numeric agent IDs.
   - Adapted from [`7059402`](https://github.com/elidickinson/pi-subagents/commit/7059402b1ebf1a593bf609c5b08c9ec8856af32e) + [`fa093c1`](https://github.com/elidickinson/pi-subagents/commit/fa093c1781a10bf39c094f217c8fc4a96ee24ad8), `send_message` compatibility alias integrated on top of parent-bridge (`message_parent`) flow.
+- From `Evizero/custom` (targeted partial port)
+  - Adapted from [`f4ae45c`](https://github.com/Evizero/pi-subagents/commit/f4ae45c85ab9f30ca27061bbef87a96bf0923b30), ignore lifecycle/UI events from ephemeral in-memory child contexts.
 
 ### Imported from fork commit `b9cc2da`
 
