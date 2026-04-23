@@ -339,7 +339,7 @@ export async function runAgent(
     }
   }
 
-  let tools = getToolsForType(type, effectiveCwd);
+  let tools: any[] = getToolsForType(type, effectiveCwd);
   if (options.agentId) {
     tools = [
       ...tools,
