@@ -13,6 +13,31 @@ export interface PromptExtras {
 }
 
 /**
+ * Remove previously injected runtime blocks from nested subagent prompts.
+ * Only strips blocks that match this extension's own injected wording, so user/
+ * project XML that happens to reuse the same tag names is preserved.
+ */
+function normalizeInheritedParentSystemPrompt(
+  prompt?: string
+): string | undefined {
+  if (!prompt?.trim()) {
+    return undefined;
+  }
+
+  let text = prompt.trim();
+  const knownInjectedBlocks = [
+    /<sub_agent_context>\s*You are operating as a sub-agent invoked to handle a specific task\.[\s\S]*?<\/sub_agent_context>\s*/gi,
+    /<runtime_truth>\s*Your callable tools in this session are exactly:[\s\S]*?<\/runtime_truth>\s*/gi,
+  ];
+
+  for (const pattern of knownInjectedBlocks) {
+    text = text.replace(pattern, "").trim();
+  }
+
+  return text || undefined;
+}
+
+/**
  * Build the system prompt for an agent from its config.
  *
  * - "replace" mode: env header + config.systemPrompt (full control, no parent identity)
@@ -50,7 +75,8 @@ Platform: ${env.platform}`;
     extraSections.length > 0 ? `\n\n${extraSections.join("\n")}` : "";
 
   if (config.promptMode === "append") {
-    const identity = parentSystemPrompt || genericBase;
+    const identity =
+      normalizeInheritedParentSystemPrompt(parentSystemPrompt) ?? genericBase;
 
     const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.

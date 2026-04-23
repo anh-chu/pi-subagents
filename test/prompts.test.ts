@@ -328,6 +328,75 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("Preloaded Skill: skill1");
   });
 
+  it("strips injected sub_agent_context from inherited parent prompt", () => {
+    const config = getDefaultConfig("general-purpose");
+    const injectedParent = [
+      "You are a parent coding agent.",
+      "",
+      "<sub_agent_context>",
+      "You are operating as a sub-agent invoked to handle a specific task.",
+      "- Use absolute file paths",
+      "</sub_agent_context>",
+      "",
+      "More parent content.",
+    ].join("\n");
+    const prompt = buildAgentPrompt(config, "/workspace", env, injectedParent);
+    expect(prompt).toContain("You are a parent coding agent.");
+    expect(prompt).toContain("More parent content.");
+    // The stale injected block is stripped — only the fresh one from this build remains
+    const contextMatches = (prompt.match(/<sub_agent_context>/g) ?? []).length;
+    expect(contextMatches).toBe(1);
+  });
+
+  it("strips injected runtime_truth blocks from inherited parent prompt", () => {
+    const config = getDefaultConfig("general-purpose");
+    const injectedParent = [
+      "Before.",
+      "",
+      "<runtime_truth>",
+      "Your callable tools in this session are exactly: bash.",
+      "Do not infer tool availability from inherited prompts.",
+      "</runtime_truth>",
+      "",
+      "After.",
+    ].join("\n");
+    const prompt = buildAgentPrompt(config, "/workspace", env, injectedParent);
+    expect(prompt).toContain("Before.");
+    expect(prompt).toContain("After.");
+    expect(prompt).not.toContain("exactly: bash");
+  });
+
+  it("preserves ordinary parent text around injected blocks", () => {
+    const config = getDefaultConfig("general-purpose");
+    const injectedParent = [
+      "Keep this.",
+      "",
+      "<sub_agent_context>",
+      "You are operating as a sub-agent invoked to handle a specific task.",
+      "- Use absolute file paths",
+      "</sub_agent_context>",
+      "",
+      "Keep this too.",
+    ].join("\n");
+    const prompt = buildAgentPrompt(config, "/workspace", env, injectedParent);
+    expect(prompt).toContain("Keep this.");
+    expect(prompt).toContain("Keep this too.");
+  });
+
+  it("does not strip unrelated XML with same tag names", () => {
+    const config = getDefaultConfig("general-purpose");
+    // This does NOT match the exact injected wording pattern
+    const parentWithUnrelatedXml =
+      "<sub_agent_context>Custom project rules here.</sub_agent_context>";
+    const prompt = buildAgentPrompt(
+      config,
+      "/workspace",
+      env,
+      parentWithUnrelatedXml
+    );
+    expect(prompt).toContain("Custom project rules here.");
+  });
+
   it("no extras means no extra sections", () => {
     const config: AgentConfig = {
       name: "plain",
