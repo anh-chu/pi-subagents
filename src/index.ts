@@ -714,14 +714,24 @@ export default function (pi: ExtensionAPI) {
 
   // --- Cross-extension RPC via pi.events ---
 
+  function isEphemeralSubagentContext(ctx: ExtensionContext): boolean {
+    return ctx.hasUI === false && !ctx.sessionManager?.getSessionFile?.();
+  }
+
   // Capture ctx from session_start for RPC spawn handler
   pi.on("session_start", async (_event, ctx) => {
+    if (isEphemeralSubagentContext(ctx)) {
+      return;
+    }
     currentCtx = ctx;
     manager.clearCompleted(); // preserve existing behavior
     flushQueuedParentBridgeMessages(ctx);
   });
 
   pi.on("session_switch", async (_event, ctx) => {
+    if (isEphemeralSubagentContext(ctx)) {
+      return;
+    }
     currentCtx = ctx;
     manager.clearCompleted();
     flushQueuedParentBridgeMessages(ctx);
@@ -840,6 +850,9 @@ export default function (pi: ExtensionAPI) {
 
   // Grab UI context from first tool execution + clear lingering widget on new turn
   pi.on("tool_execution_start", async (_event, ctx) => {
+    if (isEphemeralSubagentContext(ctx)) {
+      return;
+    }
     currentCtx = ctx;
     widget.setUICtx(ctx.ui as UICtx);
     widget.onTurnStart();
@@ -847,16 +860,25 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_execution_end", async (_event, ctx) => {
+    if (isEphemeralSubagentContext(ctx)) {
+      return;
+    }
     currentCtx = ctx;
     flushQueuedParentBridgeMessages(ctx);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
+    if (isEphemeralSubagentContext(ctx)) {
+      return;
+    }
     currentCtx = ctx;
     flushQueuedParentBridgeMessages(ctx);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (isEphemeralSubagentContext(ctx)) {
+      return;
+    }
     currentCtx = ctx;
     flushQueuedParentBridgeMessages(ctx);
   });
