@@ -48,6 +48,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 - **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML. Expandable to show full output. Group completions render each agent individually
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 - **Cross-extension RPC** — other pi extensions can spawn and stop subagents via the `pi.events` event bus (`subagents:rpc:ping`, `subagents:rpc:spawn`, `subagents:rpc:stop`). Standardized reply envelopes with protocol versioning. Emits `subagents:ready` on load
+- **Agent chains** — run agents sequentially with `{previous}` placeholder to pipe each step's output into the next prompt. Fail-fast on any step error
 
 ## Install
 
@@ -215,6 +216,7 @@ Launch a sub-agent.
 | `isolated` | boolean | no | No extension/MCP tools |
 | `isolation` | `"worktree"` | no | Run in an isolated git worktree |
 | `inherit_context` | boolean | no | Fork parent conversation into agent |
+| `chain` | array | no | Sequential chain of agents (see [Chain mode](#chain-mode)) |
 
 ### `get_subagent_result`
 
@@ -448,6 +450,24 @@ The agent gets a full, isolated copy of the repository. On completion:
 - **Changes made:** changes are committed to a new branch (`pi-agent-<id>`) and returned in the result
 
 If the worktree cannot be created (not a git repo, no commits), the agent falls back to the main working directory with a warning.
+
+## Chain Mode
+
+Run agents sequentially, piping each step's output into the next via the `{previous}` placeholder:
+
+```js
+Agent({
+  chain: [
+    { subagent_type: "Explore", prompt: "Map the auth system" },
+    { subagent_type: "Plan",    prompt: "Plan a refactor based on: {previous}" },
+    { subagent_type: "worker",  prompt: "Implement: {previous}" },
+  ]
+})
+```
+
+Each step's final output replaces `{previous}` in the next step's prompt. If any step fails or is stopped, the chain halts immediately and reports which step failed.
+
+Per-step overrides (`model`, `thinking`, `max_turns`, `description`) are supported. Top-level `model`/`thinking` on the `Agent` call serve as defaults for all steps.
 
 ## Skill Preloading
 

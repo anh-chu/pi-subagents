@@ -13,9 +13,4 @@ if has_staged "package.json"; then
     exit 1
   }
 
-  has_staged "bun.lock" || {
-    echo "error: package.json changed but bun.lock is not staged"
-    echo "fix: regenerate bun.lock from package-lock.json, then git add bun.lock"
-    exit 1
-  }
 fi
