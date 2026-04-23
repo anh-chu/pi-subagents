@@ -556,8 +556,8 @@ export class AgentWidget {
         }
 
         return {
-          render: (renderWidth: number) => {
-            if (renderWidth >= w) {
+          render: (renderWidth?: number) => {
+            if (renderWidth == null || renderWidth >= w) {
               return lines;
             }
             // Terminal narrowed since lines were built — re-truncate to avoid TUI crash

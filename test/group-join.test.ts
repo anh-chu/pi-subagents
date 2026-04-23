@@ -1,8 +1,12 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { GroupJoinManager, type DeliveryCallback } from "../src/group-join.js";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { GroupJoinManager } from "../src/group-join.js";
 import type { AgentRecord } from "../src/types.js";
 
-function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentRecord {
+function makeRecord(
+  id: string,
+  overrides: Partial<AgentRecord> = {}
+): AgentRecord {
   return {
     id,
     type: "general-purpose",
@@ -33,7 +37,9 @@ describe("GroupJoinManager", () => {
 
   it("delivers when all grouped agents complete", () => {
     const delivered: { records: AgentRecord[]; partial: boolean }[] = [];
-    manager = new GroupJoinManager((records, partial) => delivered.push({ records, partial }));
+    manager = new GroupJoinManager((records, partial) =>
+      delivered.push({ records, partial })
+    );
     manager.registerGroup("g1", ["1", "2"]);
 
     expect(manager.onAgentComplete(makeRecord("1"))).toBe("held");
@@ -42,29 +48,30 @@ describe("GroupJoinManager", () => {
     expect(manager.onAgentComplete(makeRecord("2"))).toBe("delivered");
     expect(delivered).toHaveLength(1);
     expect(delivered[0].partial).toBe(false);
-    expect(delivered[0].records.map(r => r.id).sort()).toEqual(["1", "2"]);
+    expect(delivered[0].records.map((r) => r.id).sort()).toEqual(["1", "2"]);
   });
 
-  it("partial delivery on timeout, then straggler delivery", async () => {
+  it("partial delivery on timeout suppresses later straggler redelivery", async () => {
     const delivered: { records: AgentRecord[]; partial: boolean }[] = [];
     // Use a short timeout so the test doesn't wait long
-    manager = new GroupJoinManager((records, partial) => delivered.push({ records, partial }), 50);
+    manager = new GroupJoinManager(
+      (records, partial) => delivered.push({ records, partial }),
+      50
+    );
     manager.registerGroup("g1", ["1", "2"]);
 
     manager.onAgentComplete(makeRecord("1"));
     expect(delivered).toHaveLength(0);
 
     // Wait for timeout to fire partial delivery
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 100));
     expect(delivered).toHaveLength(1);
     expect(delivered[0].partial).toBe(true);
     expect(delivered[0].records[0].id).toBe("1");
 
-    // Straggler completes — should trigger another delivery
-    manager.onAgentComplete(makeRecord("2"));
-    // Straggler with 1 agent delivers immediately (size >= agentIds.size)
-    expect(delivered).toHaveLength(2);
-    expect(delivered[1].records[0].id).toBe("2");
+    // Straggler completes — should NOT trigger second delivery
+    expect(manager.onAgentComplete(makeRecord("2"))).toBe("pass");
+    expect(delivered).toHaveLength(1);
   });
 
   // Verifies that the delivery callback receives the original record objects
@@ -89,7 +96,7 @@ describe("GroupJoinManager", () => {
     // The delivery callback gets the original record objects — the caller
     // (index.ts) filters on resultConsumed to skip already-consumed agents.
     expect(delivered).toHaveLength(1);
-    const unconsumed = delivered[0].filter(r => !r.resultConsumed);
+    const unconsumed = delivered[0].filter((r) => !r.resultConsumed);
     expect(unconsumed).toHaveLength(1);
     expect(unconsumed[0].id).toBe("2");
   });
