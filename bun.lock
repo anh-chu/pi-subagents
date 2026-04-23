@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@yzlin/pi-subagents",
+      "name": "@anh-chu/pi-subagents",
       "dependencies": {
         "@mariozechner/pi-ai": "^0.62.0",
         "@mariozechner/pi-coding-agent": "^0.62.0",

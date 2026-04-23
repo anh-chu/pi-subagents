@@ -1,4 +1,4 @@
-# @yzlin/pi-subagents
+# @anh-chu/pi-subagents
 
 ## Aggregated features and fixes, source of truth, credits
 
@@ -60,7 +60,7 @@ A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-
 > **Status:** Early release.
 > **Credit:** Forked from the original `@tintinweb/pi-subagents` work by [tintinweb](https://github.com/tintinweb).
 
-<img width="600" alt="pi-subagents screenshot" src="https://github.com/yzlin/pi-subagents/raw/master/media/screenshot.png" />
+<img width="600" alt="pi-subagents screenshot" src="https://github.com/anh-chu/pi-subagents/raw/master/media/screenshot.png" />
 
 
 https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
@@ -91,7 +91,7 @@ https://github.com/user-attachments/assets/8685261b-9338-4fea-8dfe-1c590d5df543
 ## Install
 
 ```bash
-pi install npm:@yzlin/pi-subagents
+pi install npm:@anh-chu/pi-subagents
 ```
 
 Or load directly for development:
