@@ -40,7 +40,7 @@
     "format": "biome format --write src/ test/",
     "lint": "biome check src/ test/",
     "lint:fix": "biome check --fix src/ test/",
-    "prepare": "husky"
+    "prepare": "command -v husky >/dev/null 2>&1 && husky || true"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
