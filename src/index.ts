@@ -794,7 +794,12 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     currentCtx = ctx;
-    manager.clearCompleted(); // preserve existing behavior
+    const newSessionId = ctx.sessionManager?.getSessionId?.();
+    // Detach agents from previous sessions so they don't fire notifications
+    // into this session. Abandoned agents are cleaned up once settled.
+    manager.detachAllExcept(newSessionId, true);
+    manager.clearDetachedCompleted();
+    manager.clearCompleted();
     flushQueuedParentBridgeMessages(ctx);
   });
 
@@ -803,6 +808,15 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     currentCtx = ctx;
+    const switchedSessionId = ctx.sessionManager?.getSessionId?.();
+    if (ctx.sessionManager?.getSessionFile?.()) {
+      // Resuming an existing session — restore its agents to visibility.
+      manager.attachSession(switchedSessionId);
+    } else {
+      // New session — detach everything else.
+      manager.detachAllExcept(switchedSessionId, true);
+      manager.clearDetachedCompleted();
+    }
     manager.clearCompleted();
     flushQueuedParentBridgeMessages(ctx);
   });
