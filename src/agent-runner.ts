@@ -37,6 +37,7 @@ const EXCLUDED_TOOL_NAMES = [
   "steer_subagent",
   "reply_to_subagent",
   "get_subagent_message",
+  "send_message",
 ];
 
 /** Default max turns. undefined = unlimited (no turn limit). */
@@ -204,6 +205,21 @@ function createParentBridgeTools(
   parentSessionId = DEFAULT_PARENT_SESSION_ID,
   allowAskParent = true
 ) {
+  const queueMessageForParent = (message: string) => {
+    const queued = parentBridge.messageParent(agentId, message, {
+      sessionId: parentSessionId,
+    });
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Queued message for parent (${queued.requestId}).`,
+        },
+      ],
+      details: { requestId: queued.requestId },
+    };
+  };
+
   const tools = [
     {
       name: "message_parent",
@@ -216,18 +232,22 @@ function createParentBridgeTools(
       }),
       async execute(_toolCallId: string, params: unknown) {
         const { message } = params as { message: string };
-        const queued = parentBridge.messageParent(agentId, message, {
-          sessionId: parentSessionId,
-        });
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Queued message for parent (${queued.requestId}).`,
-            },
-          ],
-          details: { requestId: queued.requestId },
-        };
+        return queueMessageForParent(message);
+      },
+    },
+    {
+      name: "send_message",
+      label: "Send Message",
+      description:
+        "Compatibility alias for message_parent, queue a one-way message for the parent agent.",
+      parameters: Type.Object({
+        message: Type.String({
+          description: "The message to send to the parent agent.",
+        }),
+      }),
+      async execute(_toolCallId: string, params: unknown) {
+        const { message } = params as { message: string };
+        return queueMessageForParent(message);
       },
     },
   ];

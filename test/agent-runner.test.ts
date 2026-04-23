@@ -9,7 +9,9 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   DefaultResourceLoader: class {
     async reload() {}
   },
-  SessionManager: { inMemory: vi.fn(() => ({ kind: "memory-session-manager" })) },
+  SessionManager: {
+    inMemory: vi.fn(() => ({ kind: "memory-session-manager" })),
+  },
   SettingsManager: { create: vi.fn(() => ({ kind: "settings-manager" })) },
 }));
 
@@ -44,7 +46,11 @@ vi.mock("../src/agent-types.js", () => ({
 }));
 
 vi.mock("../src/env.js", () => ({
-  detectEnv: vi.fn(async () => ({ isGitRepo: false, branch: "", platform: "linux" })),
+  detectEnv: vi.fn(async () => ({
+    isGitRepo: false,
+    branch: "",
+    platform: "linux",
+  })),
 }));
 
 vi.mock("../src/prompts.js", () => ({
@@ -60,8 +66,8 @@ vi.mock("../src/skill-loader.js", () => ({
   preloadSkills: vi.fn(() => []),
 }));
 
-import { getAgentConfig, getConfig } from "../src/agent-types.js";
 import { resumeAgent, runAgent } from "../src/agent-runner.js";
+import { getAgentConfig, getConfig } from "../src/agent-types.js";
 import { parentBridge } from "../src/parent-bridge.js";
 
 function createSession(finalText: string) {
@@ -123,7 +129,7 @@ describe("agent-runner final output capture", () => {
 
     expect(session.bindExtensions).toHaveBeenCalledTimes(1);
     expect(session.bindExtensions).toHaveBeenCalledWith(
-      expect.objectContaining({ onError: expect.any(Function) }),
+      expect.objectContaining({ onError: expect.any(Function) })
     );
 
     const bindOrder = session.bindExtensions.mock.invocationCallOrder[0];
@@ -133,10 +139,21 @@ describe("agent-runner final output capture", () => {
 
   it("does not inherit parent-only bridge tools into child sessions", async () => {
     const { session } = createSession("BOUND");
-    session.getActiveToolNames.mockReturnValue(["read", "reply_to_subagent", "get_subagent_message", "steer_subagent"]);
+    session.getActiveToolNames.mockReturnValue([
+      "read",
+      "reply_to_subagent",
+      "get_subagent_message",
+      "steer_subagent",
+    ]);
     createAgentSession.mockResolvedValue({ session });
-    vi.mocked(getConfig).mockReturnValue({ ...DEFAULT_CONFIG, extensions: true } as any);
-    vi.mocked(getAgentConfig).mockReturnValue({ ...DEFAULT_AGENT_CONFIG, extensions: true } as any);
+    vi.mocked(getConfig).mockReturnValue({
+      ...DEFAULT_CONFIG,
+      extensions: true,
+    } as any);
+    vi.mocked(getAgentConfig).mockReturnValue({
+      ...DEFAULT_AGENT_CONFIG,
+      extensions: true,
+    } as any);
 
     await runAgent(ctx, "Explore", "Say BOUND", { pi });
 
@@ -149,9 +166,16 @@ describe("agent-runner final output capture", () => {
 
     await runAgent(ctx, "Explore", "Say BRIDGED", { pi, agentId: "agent-123" });
 
-    const sessionOptions = createAgentSession.mock.calls[0][0] as { tools: Array<{ name: string }> };
+    const sessionOptions = createAgentSession.mock.calls[0][0] as {
+      tools: Array<{ name: string }>;
+    };
     expect(sessionOptions.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(["read", "message_parent", "ask_parent"]),
+      expect.arrayContaining([
+        "read",
+        "message_parent",
+        "send_message",
+        "ask_parent",
+      ])
     );
   });
 
@@ -162,17 +186,27 @@ describe("agent-runner final output capture", () => {
     await runAgent(ctx, "Explore", "Send update", { pi, agentId: "agent-123" });
 
     const sessionOptions = createAgentSession.mock.calls[0][0] as {
-      tools: Array<{ name: string; execute: (toolCallId: string, params: unknown) => Promise<any> }>;
+      tools: Array<{
+        name: string;
+        execute: (toolCallId: string, params: unknown) => Promise<any>;
+      }>;
     };
-    const messageParentTool = sessionOptions.tools.find((tool) => tool.name === "message_parent");
+    const messageParentTool = sessionOptions.tools.find(
+      (tool) => tool.name === "message_parent"
+    );
 
     expect(messageParentTool).toBeDefined();
 
-    const result = await messageParentTool!.execute("tool-call-1", { message: "Heads up" });
+    const result = await messageParentTool!.execute("tool-call-1", {
+      message: "Heads up",
+    });
     const queued = parentBridge.drainMessages("agent-123");
 
     expect(result.content).toEqual([
-      { type: "text", text: `Queued message for parent (${result.details.requestId}).` },
+      {
+        type: "text",
+        text: `Queued message for parent (${result.details.requestId}).`,
+      },
     ]);
     expect(result.details.requestId).toEqual(expect.any(String));
     expect(queued).toEqual([
@@ -185,16 +219,71 @@ describe("agent-runner final output capture", () => {
     ]);
   });
 
+  it("send_message alias queues a one-way parent update", async () => {
+    const { session } = createSession("BRIDGED");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "Send alias update", {
+      pi,
+      agentId: "agent-123",
+    });
+
+    const sessionOptions = createAgentSession.mock.calls[0][0] as {
+      tools: Array<{
+        name: string;
+        execute: (toolCallId: string, params: unknown) => Promise<any>;
+      }>;
+    };
+    const sendMessageTool = sessionOptions.tools.find(
+      (tool) => tool.name === "send_message"
+    );
+
+    expect(sendMessageTool).toBeDefined();
+
+    const result = await sendMessageTool!.execute("tool-call-1", {
+      message: "Alias heads up",
+    });
+    const queued = parentBridge.drainMessages("agent-123");
+
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: `Queued message for parent (${result.details.requestId}).`,
+      },
+    ]);
+    expect(result.details.requestId).toEqual(expect.any(String));
+    expect(queued).toEqual([
+      expect.objectContaining({
+        agentId: "agent-123",
+        requestId: result.details.requestId,
+        kind: "message",
+        message: "Alias heads up",
+      }),
+    ]);
+  });
+
   it("ask_parent queues a request and resolves with the parent reply", async () => {
     const { session } = createSession("BRIDGED");
     createAgentSession.mockResolvedValue({ session });
 
-    await runAgent(ctx, "Explore", "Need approval", { pi, agentId: "agent-123" });
+    await runAgent(ctx, "Explore", "Need approval", {
+      pi,
+      agentId: "agent-123",
+    });
 
     const sessionOptions = createAgentSession.mock.calls[0][0] as {
-      tools: Array<{ name: string; execute: (toolCallId: string, params: unknown, signal?: AbortSignal) => Promise<any> }>;
+      tools: Array<{
+        name: string;
+        execute: (
+          toolCallId: string,
+          params: unknown,
+          signal?: AbortSignal
+        ) => Promise<any>;
+      }>;
     };
-    const askParentTool = sessionOptions.tools.find((tool) => tool.name === "ask_parent");
+    const askParentTool = sessionOptions.tools.find(
+      (tool) => tool.name === "ask_parent"
+    );
 
     expect(askParentTool).toBeDefined();
 
