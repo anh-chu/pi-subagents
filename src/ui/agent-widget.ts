@@ -64,7 +64,8 @@ export interface AgentActivity {
   activeTools: Map<string, string>;
   toolUses: number;
   turns: number;
-  maxTurns: number;
+  turnCount?: number;
+  maxTurns?: number;
   tokens: string;
   responseText: string;
   session?: { getSessionStats(): { tokens: { total: number } } };
@@ -93,12 +94,14 @@ export interface AgentDetails {
   spinnerFrame?: number;
   /** Short model name if different from parent (e.g. "haiku", "sonnet"). */
   modelName?: string;
+  thinkingLevel?: string;
   /** Notable config tags (e.g. ["thinking: high", "isolated"]). */
   tags?: string[];
   agentId?: string;
   error?: string;
   /** Current turn count (for running agents). */
   turns?: number;
+  turnCount?: number;
   /** Max turns limit (for running agents). */
   maxTurns?: number;
 }
@@ -119,6 +122,11 @@ export function formatTokens(count: number): string {
 /** Format milliseconds as human-readable duration. */
 export function formatMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Format turns compactly for renderer. */
+export function formatTurns(turnCount: number, maxTurns?: number): string {
+  return maxTurns ? `⟳${turnCount}≤${maxTurns}` : `⟳${turnCount}`;
 }
 
 /** Format duration from start/completed timestamps. */
