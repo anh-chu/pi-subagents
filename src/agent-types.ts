@@ -31,6 +31,8 @@ const TOOL_FACTORIES = {
 type BuiltinToolName = keyof typeof TOOL_FACTORIES;
 type BuiltinTool = ReturnType<(typeof TOOL_FACTORIES)[BuiltinToolName]>;
 
+export type { BuiltinTool, BuiltinToolName };
+
 function isBuiltinToolName(name: string): name is BuiltinToolName {
   return name in TOOL_FACTORIES;
 }
@@ -129,6 +131,15 @@ export function isValidType(type: string): boolean {
 const MEMORY_TOOL_NAMES: BuiltinToolName[] = ["read", "write", "edit"];
 
 /**
+ * Get the memory tool names that are not already active.
+ */
+export function getMemoryToolNames(existingToolNames: Set<string>): string[] {
+  return MEMORY_TOOL_NAMES.filter(
+    (name) => !existingToolNames.has(name) && isBuiltinToolName(name)
+  );
+}
+
+/**
  * Get the tools needed for memory management (read, write, edit).
  * Only returns tools that are NOT already in the provided set.
  */
@@ -136,13 +147,24 @@ export function getMemoryTools(
   cwd: string,
   existingToolNames: Set<string>
 ): BuiltinTool[] {
-  return MEMORY_TOOL_NAMES.filter(
-    (name) => !existingToolNames.has(name) && isBuiltinToolName(name)
-  ).map((name) => TOOL_FACTORIES[name](cwd));
+  return getMemoryToolNames(existingToolNames).map((name) =>
+    TOOL_FACTORIES[name as BuiltinToolName](cwd)
+  );
 }
 
 /** Tool names needed for read-only memory access. */
 const READONLY_MEMORY_TOOL_NAMES: BuiltinToolName[] = ["read"];
+
+/**
+ * Get the read-only memory tool names that are not already active.
+ */
+export function getReadOnlyMemoryToolNames(
+  existingToolNames: Set<string>
+): string[] {
+  return READONLY_MEMORY_TOOL_NAMES.filter(
+    (name) => !existingToolNames.has(name) && isBuiltinToolName(name)
+  );
+}
 
 /**
  * Get only the read tool for read-only memory access.
@@ -152,22 +174,27 @@ export function getReadOnlyMemoryTools(
   cwd: string,
   existingToolNames: Set<string>
 ): BuiltinTool[] {
-  return READONLY_MEMORY_TOOL_NAMES.filter(
-    (name) => !existingToolNames.has(name) && isBuiltinToolName(name)
-  ).map((name) => TOOL_FACTORIES[name](cwd));
+  return getReadOnlyMemoryToolNames(existingToolNames).map((name) =>
+    TOOL_FACTORIES[name as BuiltinToolName](cwd)
+  );
 }
 
-/** Get built-in tools for a type (case-insensitive). */
-export function getToolsForType(type: string, cwd: string): BuiltinTool[] {
+/** Get built-in tool names for a type (case-insensitive). */
+export function getToolNamesForType(type: string): string[] {
   const key = resolveKey(type);
   const raw = key ? agents.get(key) : undefined;
   const config = raw?.enabled === false ? undefined : raw;
   const toolNames = config?.builtinToolNames?.length
     ? config.builtinToolNames
     : BUILTIN_TOOL_NAMES;
-  return toolNames
-    .filter(isBuiltinToolName)
-    .map((name) => TOOL_FACTORIES[name](cwd));
+  return toolNames.filter(isBuiltinToolName);
+}
+
+/** Get built-in tools for a type (case-insensitive). */
+export function getToolsForType(type: string, cwd: string): BuiltinTool[] {
+  return getToolNamesForType(type).map((name) =>
+    TOOL_FACTORIES[name as BuiltinToolName](cwd)
+  );
 }
 
 /** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object). Falls back to general-purpose. */

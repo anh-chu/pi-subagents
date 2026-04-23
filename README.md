@@ -41,6 +41,7 @@ This branch aggregates work from these four fork branches:
 - From `Evizero/custom` (targeted partial port)
   - Adapted from [`f4ae45c`](https://github.com/Evizero/pi-subagents/commit/f4ae45c85ab9f30ca27061bbef87a96bf0923b30), ignore lifecycle/UI events from ephemeral in-memory child contexts.
   - Adapted from [`f9118b9`](https://github.com/Evizero/pi-subagents/commit/f9118b9058e8b7bc384b406e87a17004f2981b91) + [`60f2d8e`](https://github.com/Evizero/pi-subagents/commit/60f2d8ee0dd62d7f58fe374d8ca051d2c67bbf51), improved result preview rendering plus renderer regression tests.
+  - Adapted from [`153595b`](https://github.com/Evizero/pi-subagents/commit/153595b9fda993d82ac0a2d719793efe07cac8a4), tool-selection hardening: add name-only query functions, switch getToolsForType to return names for session tool resolution.
 
 ### Imported from fork commit `b9cc2da`
 
