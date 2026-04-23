@@ -45,6 +45,7 @@ import {
 } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
+import { debugLogger } from "./debug-logger.js";
 import { GroupJoinManager } from "./group-join.js";
 import {
   resolveAgentInvocationConfig,
@@ -427,13 +428,15 @@ function buildNotificationDetails(
     error: record.error,
     resultPreview: record.result
       ? record.result.length > resultMaxLen
-        ? record.result.slice(0, resultMaxLen) + "…"
+        ? `${record.result.slice(0, resultMaxLen)}…`
         : record.result
       : "No output.",
   };
 }
 
 export default function (pi: ExtensionAPI) {
+  debugLogger.info("extension:init", { version: "0.7.0", debug: true });
+
   // ---- Register custom notification renderer ----
   pi.registerMessageRenderer<NotificationDetails>(
     "subagent-notification",
@@ -479,23 +482,23 @@ export default function (pi: ExtensionAPI) {
             "\n  " +
             parts
               .map((p) => theme.fg("dim", p))
-              .join(" " + theme.fg("dim", "·") + " ");
+              .join(` ${theme.fg("dim", "·")} `);
         }
 
         // Line 3: result preview (collapsed) or full (expanded)
         if (expanded) {
           const lines = d.resultPreview.split("\n").slice(0, 30);
           for (const l of lines) {
-            line += "\n" + theme.fg("dim", `  ${l}`);
+            line += `\n${theme.fg("dim", `  ${l}`)}`;
           }
         } else {
           const preview = d.resultPreview.split("\n")[0]?.slice(0, 80) ?? "";
-          line += "\n  " + theme.fg("dim", `⎿  ${preview}`);
+          line += `\n  ${theme.fg("dim", `⎿  ${preview}`)}`;
         }
 
         // Line 4: output file link (if present)
         if (d.outputFile) {
-          line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
+          line += `\n  ${theme.fg("muted", `transcript: ${d.outputFile}`)}`;
         }
 
         return line;
@@ -716,8 +719,21 @@ export default function (pi: ExtensionAPI) {
       const eventData = buildEventData(record);
       if (isError) {
         pi.events.emit("subagents:failed", eventData);
+        debugLogger.warn("agent:failed", {
+          id: record.id,
+          type: record.type,
+          status: record.status,
+          error: record.error,
+          description: record.description,
+        });
       } else {
         pi.events.emit("subagents:completed", eventData);
+        debugLogger.info("agent:completed", {
+          id: record.id,
+          type: record.type,
+          description: record.description,
+          toolUses: record.toolUses,
+        });
       }
 
       // Persist final record for cross-extension history reconstruction
@@ -795,6 +811,7 @@ export default function (pi: ExtensionAPI) {
     }
     currentCtx = ctx;
     const newSessionId = ctx.sessionManager?.getSessionId?.();
+    debugLogger.info("session:start", { sessionId: newSessionId });
     // Detach agents from previous sessions so they don't fire notifications
     // into this session. Abandoned agents are cleaned up once settled.
     manager.detachAllExcept(newSessionId, true);
@@ -1187,9 +1204,7 @@ Guidelines:
       }
       const suffix = tags.length
         ? " · " +
-          tags
-            .map((t) => theme.fg("dim", t))
-            .join(" " + theme.fg("dim", "·") + " ")
+          tags.map((t) => theme.fg("dim", t)).join(` ${theme.fg("dim", "·")} `)
         : "";
       return new Text(
         `▸ ${theme.fg("toolTitle", theme.bold(displayName))}${desc ? `  ${theme.fg("muted", desc)}` : ""}${suffix}`,
@@ -1227,16 +1242,15 @@ Guidelines:
         }
         return parts
           .map((p) => theme.fg("dim", p))
-          .join(" " + theme.fg("dim", "·") + " ");
+          .join(` ${theme.fg("dim", "·")} `);
       };
 
       // ---- While running (streaming) ----
       if (isPartial || details.status === "running") {
         const frame = SPINNER[details.spinnerFrame ?? 0];
         const s = stats(details);
-        let line = theme.fg("accent", frame) + (s ? " " + s : "");
-        line +=
-          "\n" + theme.fg("dim", `  ⎿  ${details.activity ?? "thinking…"}`);
+        let line = theme.fg("accent", frame) + (s ? ` ${s}` : "");
+        line += `\n${theme.fg("dim", `  ⎿  ${details.activity ?? "thinking…"}`)}`;
         return new Text(line, 0, 0);
       }
 
@@ -1260,8 +1274,8 @@ Guidelines:
           ? theme.fg("warning", "✓")
           : theme.fg("success", "✓");
         const s = stats(details);
-        let line = icon + (s ? " " + s : "");
-        line += " " + theme.fg("dim", "·") + " " + theme.fg("dim", duration);
+        let line = icon + (s ? ` ${s}` : "");
+        line += ` ${theme.fg("dim", "·")} ${theme.fg("dim", duration)}`;
 
         const resultText =
           result.content[0]?.type === "text" ? result.content[0].text : "";
@@ -1274,12 +1288,12 @@ Guidelines:
               EXPANDED_TOOL_RESULT_PREVIEW_MAX_CHARS
             );
             for (const previewLine of preview.split("\n")) {
-              line += "\n" + theme.fg("dim", `  ${previewLine}`);
+              line += `\n${theme.fg("dim", `  ${previewLine}`)}`;
             }
           }
         } else {
           const doneText = isSteered ? "Wrapped up (turn limit)" : "Done";
-          line += "\n" + theme.fg("dim", `  ⎿  ${doneText}`);
+          line += `\n${theme.fg("dim", `  ⎿  ${doneText}`)}`;
 
           const preview = resultText
             ? truncatePreview(
@@ -1291,7 +1305,7 @@ Guidelines:
             : "";
           if (preview) {
             for (const previewLine of preview.split("\n")) {
-              line += "\n" + theme.fg("dim", `  ${previewLine}`);
+              line += `\n${theme.fg("dim", `  ${previewLine}`)}`;
             }
           }
         }
@@ -1301,23 +1315,21 @@ Guidelines:
       // ---- Stopped (user-initiated abort) ----
       if (details.status === "stopped") {
         const s = stats(details);
-        let line = theme.fg("dim", "■") + (s ? " " + s : "");
-        line += "\n" + theme.fg("dim", "  ⎿  Stopped");
+        let line = theme.fg("dim", "■") + (s ? ` ${s}` : "");
+        line += `\n${theme.fg("dim", "  ⎿  Stopped")}`;
         return new Text(line, 0, 0);
       }
 
       // ---- Error / Aborted (hard max_turns) ----
       const s = stats(details);
-      let line = theme.fg("error", "✗") + (s ? " " + s : "");
+      let line = theme.fg("error", "✗") + (s ? ` ${s}` : "");
 
       if (details.status === "error") {
-        line +=
-          "\n" + theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`);
+        line += `\n${theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`)}`;
       } else if (details.status === "aborted") {
-        line += "\n" + theme.fg("warning", "  ⎿  Aborted (max turns exceeded)");
+        line += `\n${theme.fg("warning", "  ⎿  Aborted (max turns exceeded)")}`;
       } else {
-        line +=
-          "\n" + theme.fg("error", `  ⎿  Failed (status: ${details.status})`);
+        line += `\n${theme.fg("error", `  ⎿  Failed (status: ${details.status})`)}`;
       }
 
       return new Text(line, 0, 0);
@@ -1332,6 +1344,7 @@ Guidelines:
       try {
         return await executeAgent(params, signal, onUpdate, ctx);
       } catch (err) {
+        debugLogger.error("agent:crash", err, { description: params.description, subagentType: params.subagent_type });
         const msg = err instanceof Error ? err.message : String(err);
         const errorDetails: AgentDetails = {
           displayName: "Agent",
