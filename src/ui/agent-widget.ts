@@ -319,7 +319,8 @@ export class AgentWidget {
       const status = `⚡ working${".".repeat(phase + 1)}`;
       const elapsed = formatElapsed(a.startedAt);
       const name = getDisplayName(a.type);
-      const shortType = formatAgentConfigTag(a.modelName, a.thinkingLevel) ?? name;
+      const configTag = formatAgentConfigTag(a.modelName, a.thinkingLevel);
+      const shortType = configTag ? `${name} · ${configTag}` : name;
       const card = renderCard({
         title: a.description,
         badge: `#${i + 1}`,
