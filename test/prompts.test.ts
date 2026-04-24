@@ -55,7 +55,7 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("software architect");
   });
 
-  it("general-purpose uses append mode (parent twin)", () => {
+  it("general-purpose uses append mode", () => {
     const config = getDefaultConfig("general-purpose");
     const parentPrompt = "You are a parent coding agent with full powers.";
     const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt);

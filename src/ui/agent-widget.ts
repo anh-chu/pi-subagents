@@ -145,10 +145,12 @@ export function getDisplayName(type: SubagentType): string {
   return getConfig(type).displayName;
 }
 
-/** Short label for prompt mode: "twin" for append, nothing for replace (the default). */
+
+
+/** Short label for non-default prompt mode (e.g. "append"). Returns undefined for the default "replace" mode. */
 export function getPromptModeLabel(type: SubagentType): string | undefined {
   const config = getConfig(type);
-  return config.promptMode === "append" ? "twin" : undefined;
+  return config.promptMode === "append" ? "append" : undefined;
 }
 
 /** Compact model/thinking tag used in status line and tests. */
@@ -317,7 +319,7 @@ export class AgentWidget {
       const status = `⚡ working${".".repeat(phase + 1)}`;
       const elapsed = formatElapsed(a.startedAt);
       const name = getDisplayName(a.type);
-      const shortType = formatAgentConfigTag(a.modelName, a.thinkingLevel) ?? getPromptModeLabel(a.type) ?? name;
+      const shortType = formatAgentConfigTag(a.modelName, a.thinkingLevel) ?? name;
       const card = renderCard({
         title: a.description,
         badge: `#${i + 1}`,
@@ -414,6 +416,7 @@ export class AgentWidget {
   ): string {
     const name = getDisplayName(a.type);
     const modeLabel = getPromptModeLabel(a.type);
+    const modeTag = modeLabel ? ` (${modeLabel})` : "";
     const duration = formatMs((a.completedAt ?? Date.now()) - a.startedAt);
 
     let icon: string;
@@ -443,8 +446,7 @@ export class AgentWidget {
     }
     parts.push(duration);
 
-    const modeTag = modeLabel ? ` ${theme.fg("dim", `(${modeLabel})`)}` : "";
-    return `${icon} ${theme.fg("dim", name)}${modeTag}  ${theme.fg("dim", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}${statusText}`;
+    return `${icon} ${theme.fg("dim", name)}${theme.fg("dim", modeTag)}  ${theme.fg("dim", a.description)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}${statusText}`;
   }
 
   /** Force an immediate widget update. */

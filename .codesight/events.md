@@ -1,0 +1,36 @@
+# Events & Queues
+
+- `${channel}:reply:${params.requestId}` [event] — `src/cross-extension-rpc.ts`
+- `subagents:failed` [event] — `src/index.ts`
+- `subagents:completed` [event] — `src/index.ts`
+- `subagents:started` [event] — `src/index.ts`
+- `session_start` [event] — `src/index.ts`
+- `session_switch` [event] — `src/index.ts`
+- `subagents:ready` [event] — `src/index.ts`
+- `session_shutdown` [event] — `src/index.ts`
+- `tool_execution_start` [event] — `src/index.ts`
+- `tool_execution_end` [event] — `src/index.ts`
+- `turn_end` [event] — `src/index.ts`
+- `agent_end` [event] — `src/index.ts`
+- `subagents:created` [event] — `src/index.ts`
+- `subagents:steered` [event] — `src/index.ts`
+- `subagents:rpc:ping:reply:req-1` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:ping` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:ping:reply:req-other` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-s1` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-s2` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-s3` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-s4` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-other` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-s5` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-s6` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:stop:reply:req-st1` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:stop` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:stop:reply:req-st2` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:stop:reply:req-other` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:stop:reply:req-st3` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:stop:reply:req-st4` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-a` [event] — `test/cross-extension-rpc.test.ts`
+- `subagents:rpc:spawn:reply:req-b` [event] — `test/cross-extension-rpc.test.ts`
+- `agent_start` [event] — `test/index-subagent-session.test.ts`

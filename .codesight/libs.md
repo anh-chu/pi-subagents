@@ -1,0 +1,76 @@
+# Libraries
+
+- `src/agent-manager.ts`
+  - class AgentManager
+  - type OnAgentComplete
+  - type OnAgentStart
+- `src/agent-runner.ts`
+  - function normalizeMaxTurns: (n) => number | undefined
+  - function getDefaultMaxTurns: () => number | undefined
+  - function setDefaultMaxTurns: (n) => void
+  - function getGraceTurns: () => number
+  - function setGraceTurns: (n) => void
+  - function forwardAbortSignal: (session, signal?) => () => void
+  - _...7 more_
+- `src/agent-types.ts`
+  - function registerAgents: (userAgents, AgentConfig>) => void
+  - function resolveType: (name) => string | undefined
+  - function getAgentConfig: (name) => AgentConfig | undefined
+  - function getAvailableTypes: () => string[]
+  - function getAllTypes: () => string[]
+  - function getDefaultAgentNames: () => string[]
+  - _...10 more_
+- `src/context.ts` — function extractText: (content) => string, function buildParentContext: (ctx) => string
+- `src/cross-extension-rpc.ts`
+  - function registerRpcHandlers: (deps) => RpcHandle
+  - interface EventBus
+  - interface SpawnCapable
+  - interface RpcDeps
+  - interface RpcHandle
+  - type RpcReply
+  - _...1 more_
+- `src/custom-agents.ts` — function loadCustomAgents: (cwd) => Map<string, AgentConfig>
+- `src/env.ts` — function detectEnv: (pi, cwd) => Promise<EnvInfo>
+- `src/group-join.ts` — class GroupJoinManager, type DeliveryCallback
+- `src/invocation-config.ts` — function resolveAgentInvocationConfig: (agentConfig, params) => void, function resolveJoinMode: (defaultJoinMode, runInBackground) => JoinMode | undefined
+- `src/memory.ts`
+  - function isUnsafeName: (name) => boolean
+  - function isSymlink: (filePath) => boolean
+  - function safeReadFile: (filePath) => string | undefined
+  - function resolveMemoryDir: (agentName, scope, cwd) => string
+  - function ensureMemoryDir: (memoryDir) => void
+  - function readMemoryIndex: (memoryDir) => string | undefined
+  - _...2 more_
+- `src/model-resolver.ts`
+  - function resolveModel: (input, registry) => Model<Api> | string
+  - interface ModelEntry
+  - interface ModelRegistry
+- `src/output-file.ts`
+  - function createOutputFilePath: (cwd, agentId, sessionId) => string
+  - function writeInitialEntry: (path, agentId, prompt, cwd) => void
+  - function streamToOutputFile: (session, path, agentId, cwd) => () => void
+- `src/parent-bridge.ts`
+  - class ParentBridge
+  - interface QueuedParentMessage
+  - interface ParentReply
+  - const DEFAULT_ASK_PARENT_TIMEOUT_MS
+  - const DEFAULT_PARENT_SESSION_ID
+  - const parentBridge
+- `src/prompts.ts` — function buildAgentPrompt: (config, cwd, env, parentSystemPrompt?, extras?) => string, interface PromptExtras
+- `src/skill-loader.ts` — function preloadSkills: (skillNames, cwd) => PreloadedSkill[], interface PreloadedSkill
+- `src/ui/agent-widget.ts`
+  - function formatTokens: (count) => string
+  - function formatMs: (ms) => string
+  - function formatTurns: (turnCount, maxTurns?) => string
+  - function formatDuration: (startedAt, completedAt?) => string
+  - function getDisplayName: (type) => string
+  - function getPromptModeLabel: (type) => string | undefined
+  - _...9 more_
+- `src/ui/conversation-viewer.ts` — class ConversationViewer
+- `src/ui/remembering-select.ts` — function showRememberingSelect: (ctx, "ui">, title, options, config) => Promise<string | undefined>, interface RememberingSelectOption
+- `src/worktree.ts`
+  - function createWorktree: (cwd, agentId) => WorktreeInfo | undefined
+  - function cleanupWorktree: (cwd, worktree, agentDescription) => WorktreeCleanupResult
+  - function pruneWorktrees: (cwd) => void
+  - interface WorktreeInfo
+  - interface WorktreeCleanupResult
