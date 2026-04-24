@@ -1,6 +1,6 @@
 {
   "name": "@anh-chu/pi-subagents",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "A pi extension extension that brings smart Claude Code-style autonomous sub-agents to pi.",
   "author": "anh-chu",
   "contributors": [
