@@ -485,6 +485,9 @@ export class AgentWidget {
       return;
     }
 
+    // Ensure the update interval is running whenever we have agents to display
+    this.ensureTimer();
+
     // Status bar
     if (hasActive) {
       const statusParts: string[] = [];

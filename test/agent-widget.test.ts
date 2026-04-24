@@ -76,4 +76,81 @@ describe("AgentWidget", () => {
 
     vi.useRealTimers();
   });
+
+  it("restarts interval after transient empty state", () => {
+    vi.useFakeTimers();
+
+    const agent: AgentRecord = {
+      id: "agent-1",
+      type: "general-purpose",
+      description: "Task",
+      status: "running",
+      toolUses: 0,
+      startedAt: Date.now(),
+    };
+
+    const activity = new Map<string, AgentActivity>();
+
+    const uiCtx: UICtx = {
+      setStatus: vi.fn(),
+      setWidget: vi.fn(),
+    };
+
+    const manager = {
+      listAgents: () => [],
+    } as any;
+
+    const widget = new AgentWidget(manager, activity);
+    widget.setUICtx(uiCtx);
+
+    // First update with no agents — interval should be killed
+    widget.update();
+    expect((widget as any).widgetInterval).toBeUndefined();
+
+    // Agents reappear
+    manager.listAgents = () => [agent];
+    widget.update();
+
+    // Interval must be running again
+    expect((widget as any).widgetInterval).toBeDefined();
+
+    vi.useRealTimers();
+  });
+
+  it("ensureTimer is idempotent when interval already running", () => {
+    vi.useFakeTimers();
+
+    const agent: AgentRecord = {
+      id: "agent-2",
+      type: "general-purpose",
+      description: "Task",
+      status: "running",
+      toolUses: 0,
+      startedAt: Date.now(),
+    };
+
+    const activity = new Map<string, AgentActivity>();
+
+    const uiCtx: UICtx = {
+      setStatus: vi.fn(),
+      setWidget: vi.fn(),
+    };
+
+    const manager = {
+      listAgents: () => [agent],
+    } as any;
+
+    const widget = new AgentWidget(manager, activity);
+    widget.setUICtx(uiCtx);
+
+    widget.update();
+    const first = (widget as any).widgetInterval;
+    expect(first).toBeDefined();
+
+    // Second update must not replace interval
+    widget.update();
+    expect((widget as any).widgetInterval).toBe(first);
+
+    vi.useRealTimers();
+  });
 });
