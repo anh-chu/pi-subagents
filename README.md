@@ -16,6 +16,7 @@ A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-
 - **`send_message` alias** — compatibility alias for `message_parent` so agents expecting either name work without changes.
 - **Stale notification suppression** — post-consumption messages and completion nudges are dropped after `get_subagent_result` has already consumed the result.
 - **Result preview rendering** — background agent completions render a capped, safe preview instead of raw output.
+- **Dynamic agent routing hints** — the `Agent` tool description generates routing guidelines at registration time from each agent's `description` frontmatter field, so custom agents (e.g. `worker`, `reviewer`) are surfaced as routing options alongside built-ins without manual edits.
 - **Sequential numeric agent IDs** — agents get IDs like `1`, `2`, `3` instead of random strings, making logs and references easier to read.
 - **`get_subagent_result(wait=true)`** — can await queued (not yet started) agents in addition to running ones.
 - **Fuzzy model selection and crash guards** — unknown model strings and undefined `subagent_type` values are handled gracefully instead of crashing.
