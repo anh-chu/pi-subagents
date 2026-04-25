@@ -11,9 +11,10 @@
  *   /agents                 — Interactive agent management menu
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   ExtensionAPI,
@@ -89,6 +90,32 @@ import {
 import { showRememberingSelect } from "./ui/remembering-select.js";
 
 export { formatAgentConfigTag };
+
+/**
+ * Copy bundled skills from the extension's skills/ directory into
+ * ~/.pi/agent/skills/ so they appear in <available_skills> and can be
+ * loaded by any agent, not just the bundled agent types.
+ * Skips if the destination already exists (user-owned copy wins).
+ */
+function installBundledSkills(): void {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const bundledSkillsDir = join(__dirname, "../skills");
+  const targetSkillsDir = join(homedir(), ".pi", "agent", "skills");
+
+  if (!existsSync(bundledSkillsDir)) return;
+
+  for (const skill of readdirSync(bundledSkillsDir, { withFileTypes: true })) {
+    if (!skill.isDirectory()) continue;
+    const dest = join(targetSkillsDir, skill.name);
+    if (existsSync(dest)) continue; // user-owned copy wins
+    const src = join(bundledSkillsDir, skill.name);
+    mkdirSync(dest, { recursive: true });
+    for (const file of readdirSync(src)) {
+      copyFileSync(join(src, file), join(dest, file));
+    }
+    debugLogger.info("skill:installed", { skill: skill.name, dest });
+  }
+}
 
 // ---- Shared helpers ----
 
@@ -438,6 +465,10 @@ function buildNotificationDetails(
 
 export default function (pi: ExtensionAPI) {
   debugLogger.info("extension:init", { version: "0.7.0", debug: true });
+
+  // Install bundled skills into ~/.pi/agent/skills/ so they appear as pi skills
+  // and can be loaded by any agent, not just the bundled agent types.
+  installBundledSkills();
 
   // ---- Register custom notification renderer ----
   pi.registerMessageRenderer<NotificationDetails>(
