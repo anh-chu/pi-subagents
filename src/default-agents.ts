@@ -4,7 +4,20 @@
  * These are always available but can be overridden by user .md files with the same name.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
 import type { AgentConfig } from "./types.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function loadSkill(relativePath: string): string {
+  try {
+    return readFileSync(join(__dirname, relativePath), "utf-8");
+  } catch {
+    return "";
+  }
+}
 
 const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
 
@@ -124,6 +137,23 @@ List 3-5 files most critical for implementing this plan:
       runInBackground: false,
       isolated: false,
       isDefault: true,
+    },
+  ],
+  [
+    "deslopper",
+    {
+      name: "deslopper",
+      displayName: "Deslopper",
+      description: "Removes AI slop from code \u2014 dead code, duplication, needless abstraction, boundary violations. Regression-safe, deletion-first.",
+      // builtinToolNames omitted \u2014 means "all available tools" (read, write, edit, bash needed to run tests)
+      extensions: true,
+      skills: true,
+      promptMode: "append",
+      inheritContext: false,
+      runInBackground: false,
+      isolated: false,
+      isDefault: true,
+      systemPrompt: loadSkill("../skills/ai-slop-cleaner/SKILL.md"),
     },
   ],
 ]);

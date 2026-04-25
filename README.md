@@ -17,6 +17,7 @@ A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-
 - **Stale notification suppression** — post-consumption messages and completion nudges are dropped after `get_subagent_result` has already consumed the result.
 - **Result preview rendering** — background agent completions render a capped, safe preview instead of raw output.
 - **Dynamic agent routing hints** — the `Agent` tool description generates routing guidelines at registration time from each agent's `description` frontmatter field, so custom agents (e.g. `worker`, `reviewer`) are surfaced as routing options alongside built-ins without manual edits.
+- **`deslopper` agent** — built-in agent for regression-safe AI slop removal: dead code, duplication, needless abstraction, boundary violations. Invoke with `subagent_type: "deslopper"` or just ask to deslop something.
 - **Sequential numeric agent IDs** — agents get IDs like `1`, `2`, `3` instead of random strings, making logs and references easier to read.
 - **`get_subagent_result(wait=true)`** — can await queued (not yet started) agents in addition to running ones.
 - **Fuzzy model selection and crash guards** — unknown model strings and undefined `subagent_type` values are handled gracefully instead of crashing.
@@ -126,9 +127,10 @@ Group completions render each agent as a separate block. The LLM receives struct
 
 | Type | Tools | Model | Prompt Mode | Description |
 |------|-------|-------|-------------|-------------|
-| `general-purpose` | all 7 | inherit | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions |
+| `general-purpose` | all | inherit | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions |
 | `Explore` | read, bash, grep, find, ls | inherit | `replace` (standalone) | Codebase exploration (read-only) |
 | `Plan` | read, bash, grep, find, ls | inherit | `replace` (standalone) | Software architect for implementation planning (read-only) |
+| `deslopper` | all | inherit | `append` | Removes AI slop from code — dead code, duplication, needless abstraction, boundary violations. Regression-safe, deletion-first. |
 
 > **Tip:** Since all agents inherit the parent's model by default, consider creating overrides for task-appropriate models. For `Explore`, use a fast/cheap model (e.g., haiku). For `Plan`, use a capable model (e.g., opus or sonnet). See [Custom Agents](#custom-agents) below.
 
