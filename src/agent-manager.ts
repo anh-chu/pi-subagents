@@ -106,7 +106,7 @@ export class AgentManager {
     this.cleanupInterval = setInterval(
       () => this.cleanup(),
       CLEANUP_INTERVAL_MS
-    );
+    ).unref();
   }
 
   /** Update the max concurrent background agents limit. */
@@ -185,7 +185,14 @@ export class AgentManager {
       return id;
     }
 
-    this.startAgent(id, record, args);
+    // startAgent can throw (e.g. strict worktree-isolation failure) — clean
+    // up the record so callers don't see an orphan in `listAgents()`.
+    try {
+      this.startAgent(id, record, args);
+    } catch (err) {
+      this.agents.delete(id);
+      throw err;
+    }
     return id;
   }
 
@@ -195,6 +202,20 @@ export class AgentManager {
     record: AgentRecord,
     { pi, ctx, type, prompt, options }: SpawnArgs
   ) {
+    // Worktree isolation: create a temporary git worktree if requested.
+    // Done BEFORE state mutation so a throw doesn't leave orphan state.
+    let worktreeCwd: string | undefined;
+    if (options.isolation === "worktree") {
+      const wt = createWorktree(ctx.cwd, id);
+      if (!wt) {
+        throw new Error(
+          "Worktree isolation could not be created. Ensure this is a git repository with at least one commit, or omit isolation:\"worktree\"."
+        );
+      }
+      record.worktree = wt;
+      worktreeCwd = wt.path;
+    }
+
     record.status = "running";
     record.startedAt = Date.now();
     if (options.isBackground) {
@@ -202,26 +223,7 @@ export class AgentManager {
     }
     this.onStart?.(record);
 
-    // Worktree isolation: create a temporary git worktree if requested
-    let worktreeCwd: string | undefined;
-    let worktreeWarning = "";
-    if (options.isolation === "worktree") {
-      const wt = createWorktree(ctx.cwd, id);
-      if (wt) {
-        record.worktree = wt;
-        worktreeCwd = wt.path;
-      } else {
-        worktreeWarning =
-          "\n\n[WARNING: Worktree isolation was requested but failed (not a git repo, or no commits yet). Running in the main working directory instead.]";
-      }
-    }
-
-    // Prepend worktree warning to prompt if isolation failed
-    const effectivePrompt = worktreeWarning
-      ? worktreeWarning + "\n\n" + prompt
-      : prompt;
-
-    const promise = runAgent(ctx, type, effectivePrompt, {
+    const promise = runAgent(ctx, type, prompt, {
       pi,
       agentId: id,
       parentSessionId: getParentSessionId(ctx),
@@ -299,7 +301,7 @@ export class AgentManager {
         if (options.isBackground && !record.backgroundSlotReleased) {
           record.backgroundSlotReleased = true;
           this.runningBackground = Math.max(0, this.runningBackground - 1);
-          this.onComplete?.(record);
+          try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
           this.drainQueue();
         }
         return responseText;
@@ -343,7 +345,7 @@ export class AgentManager {
         if (options.isBackground && !record.backgroundSlotReleased) {
           record.backgroundSlotReleased = true;
           this.runningBackground = Math.max(0, this.runningBackground - 1);
-          this.onComplete?.(record);
+          try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
           this.drainQueue();
         }
         return "";
@@ -369,7 +371,16 @@ export class AgentManager {
       if (!record || record.status !== "queued") {
         continue;
       }
-      this.startAgent(next.id, record, next.args);
+      try {
+        this.startAgent(next.id, record, next.args);
+      } catch (err) {
+        record.status = "terminal-error";
+        record.error = err instanceof Error ? err.message : String(err);
+        record.completedAt = Date.now();
+        record.promiseSettled = true;
+        // don't block the rest of the queue
+        continue;
+      }
     }
   }
 

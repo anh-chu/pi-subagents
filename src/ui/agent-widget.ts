@@ -87,7 +87,8 @@ export interface AgentDetails {
     | "aborted"
     | "stopped"
     | "error"
-    | "background";
+    | "background"
+    | "terminal-error";
   /** Human-readable description of what the agent is currently doing. */
   activity?: string;
   /** Current spinner frame index (for animated running indicator). */

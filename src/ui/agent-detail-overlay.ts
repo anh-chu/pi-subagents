@@ -12,7 +12,7 @@ export interface AgentDetailCard {
   num: number;
   title: string;
   modelLabel: string;
-  status: "queued" | "running" | "completed" | "error" | "stopped" | "aborted" | "steered";
+  status: "queued" | "running" | "completed" | "error" | "stopped" | "aborted" | "steered" | "terminal-error";
   prompt: string;
   messages: string;
   startedAt: number;

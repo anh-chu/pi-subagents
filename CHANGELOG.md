@@ -5,15 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-05-07
+
+> **Heads-up — behavior change:**
+> - `isolation: "worktree"` now fails loud (returns an error) instead of silently falling back to the main tree. Affects users running pi in a non-git directory or a fresh repo with no commits.
+
+### Changed
+- **`isolation: "worktree"` now fails loud instead of silently falling back.** Previously when `createWorktree` returned undefined (not a git repo, no commits yet, or `git worktree add` failed), the agent ran in the main `cwd` with a `[WARNING: ...]` block prepended to its prompt — visible only to the LLM, never surfaced to the caller. Now the failure throws a structured error that propagates back to the `Agent` tool response; no agent record is created. Queued background spawns whose worktree creation fails when they dequeue are marked terminal-error and don't block the rest of the queue.
+
+### Fixed
+- **Headless `pi --print` runs no longer hang or crash after background subagents complete.** Cleanup timers no longer keep the process alive (`.unref()`), and stale completion notifications are treated as best-effort shutdown side effects (try/catch on `onComplete` and delayed nudges).
+
 ## [0.7.3] - 2026-04-24
 
 ### Changed
 - **Rename "twin" label to "append"** — the confusing `(twin)` UI tag on append-mode agents (e.g. general-purpose) now shows `(append)`, reflecting the actual prompt mode. Replace-mode agents show no tag since that is the default.
-
-## [Unreleased]
-
-### Fixed
-- **pi 0.68.x SDK compatibility** — subagent sessions now pass an explicit cwd into `SettingsManager.create()` and register subagent bridge tools via `customTools` while using the pi 0.68+ string-name tool allowlist contract. This fixes runtime breakage when loading the extension under newer host pi versions.
 
 ## [0.6.0] - 2026-04-13
 

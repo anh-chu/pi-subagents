@@ -566,7 +566,7 @@ export default function (pi: ExtensionAPI) {
       key,
       setTimeout(() => {
         pendingNudges.delete(key);
-        send();
+        try { send(); } catch { /* ignore stale completion side-effect errors */ }
       }, delay)
     );
   }
@@ -1665,23 +1665,29 @@ ${guidelinesText}
 
     streamUpdate();
 
-    const record = await manager.spawnAndWait(
-      pi,
-      ctx,
-      subagentType,
-      params.prompt,
-      {
-        description: params.description,
-        model,
-        maxTurns: effectiveMaxTurns,
-        isolated,
-        inheritContext,
-        thinkingLevel: thinking,
-        isolation,
-        ...fgCallbacks,
-      },
-      signal
-    );
+    let record: AgentRecord;
+    try {
+      record = await manager.spawnAndWait(
+        pi,
+        ctx,
+        subagentType,
+        params.prompt,
+        {
+          description: params.description,
+          model,
+          maxTurns: effectiveMaxTurns,
+          isolated,
+          inheritContext,
+          thinkingLevel: thinking,
+          isolation,
+          ...fgCallbacks,
+        },
+        signal
+      );
+    } catch (err) {
+      clearInterval(spinnerInterval);
+      return textResult(err instanceof Error ? err.message : String(err));
+    }
 
     clearInterval(spinnerInterval);
 

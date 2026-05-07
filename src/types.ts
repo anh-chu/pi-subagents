@@ -71,7 +71,8 @@ export interface AgentRecord {
     | "steered"
     | "aborted"
     | "stopped"
-    | "error";
+    | "error"
+    | "terminal-error";
   result?: string;
   error?: string;
   /** Short resolved model name for live status display. */
