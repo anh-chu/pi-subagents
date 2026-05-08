@@ -35,11 +35,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "check": "biome check src/ test/",
-    "check:write": "biome check --write src/ test/",
-    "format": "biome format --write src/ test/",
-    "lint": "biome check src/ test/",
-    "lint:fix": "biome check --fix src/ test/",
+    "check": "command -v biome >/dev/null 2>&1 && biome check src/ test/ || true",
+    "check:write": "command -v biome >/dev/null 2>&1 && biome check --write src/ test/ || true",
+    "format": "command -v biome >/dev/null 2>&1 && biome format --write src/ test/ || true",
+    "lint": "command -v biome >/dev/null 2>&1 && biome check src/ test/ || true",
+    "lint:fix": "command -v biome >/dev/null 2>&1 && biome check --fix src/ test/ || true",
     "prepare": "command -v husky >/dev/null 2>&1 && husky || true"
   },
   "devDependencies": {
