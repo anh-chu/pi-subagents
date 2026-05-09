@@ -580,6 +580,16 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ---- Individual nudge helper (async join mode) ----
+  //
+  // Why not triggerTurn:true?
+  // sendMessage({triggerTurn:true}) calls agent.prompt() directly, bypassing
+  // AgentSession.prompt() and therefore before_agent_start. The CC OAuth adapter
+  // requires before_agent_start to inject billing context; without it, Anthropic
+  // returns 400 "extra usage" and the orchestrator goes silent.
+  //
+  // Fix: when idle, trigger via sendUserMessage() which goes through
+  // AgentSession.prompt() and fires before_agent_start. When streaming, queue
+  // as nextTurn so the notification is included in the next user-initiated turn.
   function emitIndividualNudge(record: AgentRecord) {
     if (record.resultConsumed) {
       return; // re-check at send time
@@ -589,20 +599,28 @@ export default function (pi: ExtensionAPI) {
     const footer = record.outputFile
       ? `\nFull transcript available at: ${record.outputFile}`
       : "";
-
-    pi.sendMessage<NotificationDetails>(
-      {
-        customType: "subagent-notification",
-        content: notification + footer,
-        display: true,
-        details: buildNotificationDetails(
-          record,
-          500,
-          agentActivity.get(record.id)
-        ),
-      },
-      { deliverAs: "followUp", triggerTurn: true }
+    const content = notification + footer;
+    const details = buildNotificationDetails(
+      record,
+      500,
+      agentActivity.get(record.id)
     );
+
+    if (currentCtx?.isIdle() ?? false) {
+      // Idle: show notification widget, then trigger via user path.
+      // The notification lands in state (visible in TUI); the user message is a
+      // minimal trigger so the orchestrator sees both and continues automatically.
+      pi.sendMessage<NotificationDetails>(
+        { customType: "subagent-notification", content, display: true, details }
+      );
+      pi.sendUserMessage("(background agent completed — please review the notification above and continue)");
+    } else {
+      // Streaming: queue for next user-initiated turn (widget already shows finished)
+      pi.sendMessage<NotificationDetails>(
+        { customType: "subagent-notification", content, display: true, details },
+        { deliverAs: "nextTurn" }
+      );
+    }
   }
 
   function sendIndividualNudge(record: AgentRecord) {
@@ -697,15 +715,21 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      pi.sendMessage<NotificationDetails>(
-        {
-          customType: "subagent-notification",
-          content: `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`,
-          display: true,
-          details,
-        },
-        { deliverAs: "followUp", triggerTurn: true }
-      );
+      const groupContent = `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`;
+
+      if (currentCtx?.isIdle() ?? false) {
+        // Idle: show notification widget, then trigger via user path
+        pi.sendMessage<NotificationDetails>(
+          { customType: "subagent-notification", content: groupContent, display: true, details }
+        );
+        pi.sendUserMessage("(background agents completed — please review the notifications above and continue)");
+      } else {
+        // Streaming: queue for next user-initiated turn
+        pi.sendMessage<NotificationDetails>(
+          { customType: "subagent-notification", content: groupContent, display: true, details },
+          { deliverAs: "nextTurn" }
+        );
+      }
     });
     widget.update();
   }, 30_000);
