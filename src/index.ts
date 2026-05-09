@@ -613,7 +613,7 @@ export default function (pi: ExtensionAPI) {
       pi.sendMessage<NotificationDetails>(
         { customType: "subagent-notification", content, display: true, details }
       );
-      pi.sendUserMessage("(background agent completed — please review the notification above and continue)");
+      pi.sendUserMessage(content);
     } else {
       // Streaming: queue for next user-initiated turn (widget already shows finished)
       pi.sendMessage<NotificationDetails>(
@@ -722,7 +722,7 @@ export default function (pi: ExtensionAPI) {
         pi.sendMessage<NotificationDetails>(
           { customType: "subagent-notification", content: groupContent, display: true, details }
         );
-        pi.sendUserMessage("(background agents completed — please review the notifications above and continue)");
+        pi.sendUserMessage(groupContent);
       } else {
         // Streaming: queue for next user-initiated turn
         pi.sendMessage<NotificationDetails>(
