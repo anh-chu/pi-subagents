@@ -289,18 +289,37 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ---- Individual nudge helper (async join mode) ----
+  //
+  // Why not triggerTurn:true?
+  // sendMessage({triggerTurn:true}) calls agent.prompt() directly, bypassing
+  // AgentSession.prompt() and therefore before_agent_start. Some extensions
+  // rely on before_agent_start for per-turn setup; bypassing it can cause
+  // the provider to reject the turn with an error, leaving the orchestrator silent.
+  //
+  // Fix: when idle, trigger via sendUserMessage() which goes through
+  // AgentSession.prompt() and fires before_agent_start correctly. When streaming,
+  // queue as nextTurn so the notification is included in the next user-initiated turn.
   function emitIndividualNudge(record: AgentRecord) {
     if (record.resultConsumed) return;  // re-check at send time
 
     const notification = formatTaskNotification(record, 500);
     const footer = record.outputFile ? `\nFull transcript available at: ${record.outputFile}` : '';
+    const content = notification + footer;
+    const details = buildNotificationDetails(record, 500, agentActivity.get(record.id));
 
-    pi.sendMessage<NotificationDetails>({
-      customType: "subagent-notification",
-      content: notification + footer,
-      display: true,
-      details: buildNotificationDetails(record, 500, agentActivity.get(record.id)),
-    }, { deliverAs: "followUp", triggerTurn: true });
+    if (currentCtx?.isIdle() ?? false) {
+      // Idle: display notification, then trigger via user path (fires before_agent_start)
+      pi.sendMessage<NotificationDetails>(
+        { customType: "subagent-notification", content, display: true, details }
+      );
+      pi.sendUserMessage("(background agent completed \u2014 please review the notification above and continue)");
+    } else {
+      // Streaming: queue for next user-initiated turn (widget already shows finished)
+      pi.sendMessage<NotificationDetails>(
+        { customType: "subagent-notification", content, display: true, details },
+        { deliverAs: "nextTurn" }
+      );
+    }
   }
 
   function sendIndividualNudge(record: AgentRecord) {
@@ -332,12 +351,21 @@ export default function (pi: ExtensionAPI) {
           details.others = rest.map(r => buildNotificationDetails(r, 300, agentActivity.get(r.id)));
         }
 
-        pi.sendMessage<NotificationDetails>({
-          customType: "subagent-notification",
-          content: `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`,
-          display: true,
-          details,
-        }, { deliverAs: "followUp", triggerTurn: true });
+        const groupContent = `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`;
+
+        if (currentCtx?.isIdle() ?? false) {
+          // Idle: display notification, then trigger via user path
+          pi.sendMessage<NotificationDetails>(
+            { customType: "subagent-notification", content: groupContent, display: true, details }
+          );
+          pi.sendUserMessage("(background agents completed \u2014 please review the notifications above and continue)");
+        } else {
+          // Streaming: queue for next user-initiated turn
+          pi.sendMessage<NotificationDetails>(
+            { customType: "subagent-notification", content: groupContent, display: true, details },
+            { deliverAs: "nextTurn" }
+          );
+        }
       });
       widget.update();
     },
