@@ -38,6 +38,7 @@ function createCtx(sessionId: string, options: { hasUI: boolean; sessionFile?: s
     model: undefined,
     modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
     getSystemPrompt: vi.fn(() => "parent prompt"),
+    isIdle: vi.fn(() => true),
     sessionManager: {
       getSessionId: vi.fn(() => sessionId),
       getSessionFile: vi.fn(() => options.sessionFile),

@@ -579,48 +579,42 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  // ---- Individual nudge helper (async join mode) ----
+  // ---- Completion nudge delivery ----
   //
-  // Why not triggerTurn:true?
-  // sendMessage({triggerTurn:true}) calls agent.prompt() directly, bypassing
-  // AgentSession.prompt() and therefore before_agent_start. The CC OAuth adapter
-  // requires before_agent_start to inject billing context; without it, Anthropic
-  // returns 400 "extra usage" and the orchestrator goes silent.
+  // Do not use sendMessage({ triggerTurn: true }): it calls agent.prompt() directly,
+  // bypassing AgentSession.prompt() and skipping before_agent_start. Extensions that
+  // rely on before_agent_start (e.g. CC OAuth adapter for billing context) will cause
+  // the provider to reject the turn with a 400 and the orchestrator goes silent.
   //
-  // Fix: when idle, trigger via sendUserMessage() which goes through
-  // AgentSession.prompt() and fires before_agent_start. When streaming, queue
-  // as nextTurn so the notification is included in the next user-initiated turn.
+  // When idle: display the notification widget, then trigger via sendUserMessage() so
+  // AgentSession.prompt() is called and before_agent_start fires.
+  // When streaming: queue locally and flush automatically in agent_end once idle.
+
+  const queuedCompletionNudges: Array<{ content: string; details: NotificationDetails }> = [];
+
+  function deliverCompletionNudge(content: string, details: NotificationDetails) {
+    if (currentCtx?.isIdle?.() === true) {
+      pi.sendMessage<NotificationDetails>(
+        { customType: "subagent-notification", content, display: true, details }
+      );
+      pi.sendUserMessage("Background subagent completed. Review the notification above and continue.");
+    } else {
+      queuedCompletionNudges.push({ content, details });
+    }
+  }
+
   function emitIndividualNudge(record: AgentRecord) {
     if (record.resultConsumed) {
       return; // re-check at send time
     }
-
     const notification = formatTaskNotification(record, 500);
     const footer = record.outputFile
       ? `\nFull transcript available at: ${record.outputFile}`
       : "";
-    const content = notification + footer;
-    const details = buildNotificationDetails(
-      record,
-      500,
-      agentActivity.get(record.id)
+    deliverCompletionNudge(
+      notification + footer,
+      buildNotificationDetails(record, 500, agentActivity.get(record.id))
     );
-
-    if (currentCtx?.isIdle() ?? false) {
-      // Idle: show notification widget, then trigger via user path.
-      // The notification lands in state (visible in TUI); the user message is a
-      // minimal trigger so the orchestrator sees both and continues automatically.
-      pi.sendMessage<NotificationDetails>(
-        { customType: "subagent-notification", content, display: true, details }
-      );
-      pi.sendUserMessage(content);
-    } else {
-      // Streaming: queue for next user-initiated turn (widget already shows finished)
-      pi.sendMessage<NotificationDetails>(
-        { customType: "subagent-notification", content, display: true, details },
-        { deliverAs: "nextTurn" }
-      );
-    }
   }
 
   function sendIndividualNudge(record: AgentRecord) {
@@ -715,21 +709,10 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      const groupContent = `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`;
-
-      if (currentCtx?.isIdle() ?? false) {
-        // Idle: show notification widget, then trigger via user path
-        pi.sendMessage<NotificationDetails>(
-          { customType: "subagent-notification", content: groupContent, display: true, details }
-        );
-        pi.sendUserMessage(groupContent);
-      } else {
-        // Streaming: queue for next user-initiated turn
-        pi.sendMessage<NotificationDetails>(
-          { customType: "subagent-notification", content: groupContent, display: true, details },
-          { deliverAs: "nextTurn" }
-        );
-      }
+      deliverCompletionNudge(
+        `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`,
+        details
+      );
     });
     widget.update();
   }, 30_000);
@@ -1039,6 +1022,13 @@ export default function (pi: ExtensionAPI) {
     }
     currentCtx = ctx;
     flushQueuedParentBridgeMessages(ctx);
+    // Flush any completion nudges that arrived while the orchestrator was streaming.
+    // agent_end fires after the turn fully settles, so isIdle() is true here.
+    if (ctx.isIdle?.() === true && queuedCompletionNudges.length > 0) {
+      for (const nudge of queuedCompletionNudges.splice(0)) {
+        deliverCompletionNudge(nudge.content, nudge.details);
+      }
+    }
   });
 
   /** Build the full type list text dynamically from the unified registry. */
