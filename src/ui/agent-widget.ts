@@ -8,7 +8,7 @@
 import { truncateToWidth } from "@mariozechner/pi-tui";
 import type { AgentManager } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
-import type { SubagentType, ThinkingLevel } from "../types.js";
+import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.js";
 import { CARD_THEMES, formatElapsed, renderCard } from "../ui/tui-draw.js";
 import { getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
 
@@ -161,6 +161,21 @@ export function getDisplayName(type: SubagentType): string {
 export function getPromptModeLabel(type: SubagentType): string | undefined {
   const config = getConfig(type);
   return config.promptMode === "append" ? "twin" : undefined;
+}
+
+/** Mode label is not included — callers add it where they want it. */
+export function buildInvocationTags(
+  invocation: AgentInvocation | undefined,
+): { modelName?: string; tags: string[] } {
+  const tags: string[] = [];
+  if (!invocation) return { tags };
+  if (invocation.thinking) tags.push(`thinking: ${invocation.thinking}`);
+  if (invocation.isolated) tags.push("isolated");
+  if (invocation.isolation === "worktree") tags.push("worktree");
+  if (invocation.inheritContext) tags.push("inherit context");
+  if (invocation.runInBackground) tags.push("background");
+  if (invocation.maxTurns != null) tags.push(`max turns: ${invocation.maxTurns}`);
+  return { modelName: invocation.modelName, tags };
 }
 
 /** Truncate text to a single line, max `len` chars. */
