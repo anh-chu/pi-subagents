@@ -1,0 +1,249 @@
+/**
+ * chain-io.ts — File-based output/input utilities for agent chain execution.
+ *
+ * Imitates the file-based output-input chaining pattern from nicobailon/pi-subagents:
+ *   - Each chain run gets a unique scratch directory under $TMPDIR.
+ *   - Steps can write output to a named file (via `output` + injected instruction).
+ *   - Steps can read input from previously-written files (via `reads`).
+ *   - Prompts support {previous} and {chain_dir} placeholder substitution.
+ *   - outputMode "inline" (default) includes content in results; "file-only" omits it.
+ */
+
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { join } from "node:path";
+import { nanoid } from "nanoid";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type ChainOutputMode = "inline" | "file-only";
+
+export interface ChainStepIO {
+  /** Optional path to write step output to (relative to cwd or absolute). */
+  output?: string;
+  /** Whether to include file content inline in the result or only store on disk. */
+  outputMode?: ChainOutputMode;
+  /** File paths to read at the start of this step and prepend to the prompt. */
+  reads?: string[] | false;
+}
+
+export interface PersistResult {
+  /** Absolute path the output was saved to. */
+  savedPath: string;
+  /** Error message if the write failed. */
+  saveError?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Chain directory
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a per-run scratch directory under $TMPDIR.
+ * Returns the absolute path. Callers should clean up when the chain is done.
+ *
+ * Layout: /tmp/pi-subagents-chain-<uid>/<runId>
+ */
+export function createChainDir(): string {
+  const uid = process.getuid?.() ?? 0;
+  const root = join(tmpdir(), `pi-subagents-chain-${uid}`);
+  const runId = nanoid(12);
+  const dir = join(root, runId);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+// ---------------------------------------------------------------------------
+// Placeholder substitution
+// ---------------------------------------------------------------------------
+
+/**
+ * Replace {previous} and {chain_dir} placeholders in a prompt string.
+ *
+ * @param prompt    Raw prompt from the chain step config
+ * @param previous  Output of the preceding step (empty string for step 0)
+ * @param chainDir  Absolute path to the per-run chain directory
+ */
+export function substituteChainPlaceholders(
+  prompt: string,
+  previous: string,
+  chainDir: string,
+): string {
+  return prompt
+    .replace(/\{previous\}/g, previous)
+    .replace(/\{chain_dir\}/g, chainDir);
+}
+
+// ---------------------------------------------------------------------------
+// Output file management
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a step's output path.
+ * Relative paths are resolved against `cwd`.
+ * Returns undefined when `output` is not a non-empty string.
+ */
+export function resolveOutputPath(
+  output: string | false | undefined,
+  cwd: string,
+): string | undefined {
+  if (typeof output !== "string" || !output) return undefined;
+  return isAbsolute(output) ? output : resolve(cwd, output);
+}
+
+/**
+ * Inject an "Output:" instruction into a prompt so the agent knows where to
+ * write its findings. Placed after a separator at the end of the prompt.
+ *
+ * Only injected when `outputPath` is defined.
+ */
+export function injectOutputInstruction(
+  prompt: string,
+  outputPath: string | undefined,
+): string {
+  if (!outputPath) return prompt;
+  return `${prompt}\n\n---\n**Output:** Write your complete findings/result to: ${outputPath}`;
+}
+
+/**
+ * Write `content` to `outputPath`, creating parent directories as needed.
+ * Returns a PersistResult describing success or failure.
+ */
+export function persistStepOutput(
+  outputPath: string,
+  content: string,
+): PersistResult {
+  try {
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(outputPath, content, "utf-8");
+    return { savedPath: outputPath };
+  } catch (err) {
+    return {
+      savedPath: outputPath,
+      saveError: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Capture the mtime+size of an output file before a step runs (snapshot),
+ * so we can detect whether the agent actually wrote to it.
+ */
+export function snapshotOutputFile(
+  outputPath: string | undefined,
+): { exists: boolean; mtimeMs?: number; size?: number } | undefined {
+  if (!outputPath) return undefined;
+  try {
+    const stat = statSync(outputPath);
+    return { exists: true, mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch {
+    return { exists: false };
+  }
+}
+
+/**
+ * After a step completes, resolve the canonical output string.
+ *
+ * Priority:
+ *  1. If `outputPath` is set and the file was written (or updated) by the agent
+ *     since the snapshot, read its content.
+ *  2. Otherwise fall back to `fallbackOutput` (in-memory agent response).
+ *
+ * Returns `{ output, savedPath?, saveError? }`.
+ */
+export function resolveStepOutput(params: {
+  outputPath: string | undefined;
+  fallbackOutput: string;
+  snapshot: ReturnType<typeof snapshotOutputFile>;
+}): { output: string; savedPath?: string; saveError?: string } {
+  const { outputPath, fallbackOutput, snapshot } = params;
+
+  if (!outputPath) return { output: fallbackOutput };
+
+  // Check whether the agent actually wrote/modified the file
+  let fileContent: string | undefined;
+  try {
+    const stat = statSync(outputPath);
+    const wasModified =
+      !snapshot?.exists ||
+      stat.mtimeMs !== snapshot.mtimeMs ||
+      stat.size !== snapshot.size;
+    if (wasModified) {
+      fileContent = readFileSync(outputPath, "utf-8");
+    }
+  } catch {
+    // File not found or unreadable — fall back to in-memory output
+  }
+
+  if (fileContent !== undefined) {
+    return { output: fileContent, savedPath: outputPath };
+  }
+
+  // Agent didn't write the file — persist the in-memory output and warn
+  const persist = persistStepOutput(outputPath, fallbackOutput);
+  return {
+    output: fallbackOutput,
+    savedPath: persist.savedPath,
+    saveError: persist.saveError
+      ? persist.saveError
+      : "Agent did not write to the output file; in-memory output was saved instead.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Reads (input files)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a list of files and build a prefix block to prepend to the step prompt.
+ *
+ * Files that cannot be read are skipped with a warning comment embedded in the block.
+ * Returns an empty string when `reads` is falsy or empty.
+ */
+export function buildReadsBlock(
+  reads: string[] | false | undefined,
+  cwd: string,
+): string {
+  if (!reads || reads.length === 0) return "";
+
+  const sections: string[] = [];
+
+  for (const rawPath of reads) {
+    const absPath = isAbsolute(rawPath) ? rawPath : resolve(cwd, rawPath);
+    try {
+      const content = readFileSync(absPath, "utf-8");
+      sections.push(`<file path="${absPath}">\n${content}\n</file>`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      sections.push(`<file path="${absPath}" error="Could not read: ${msg}" />`);
+    }
+  }
+
+  if (sections.length === 0) return "";
+
+  return `<context>\n${sections.join("\n")}\n</context>\n\n`;
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a chain step's IO config.
+ * Returns an error string if the config is invalid, undefined otherwise.
+ */
+export function validateStepIO(
+  stepIndex: number,
+  io: ChainStepIO,
+): string | undefined {
+  if (io.outputMode === "file-only" && !io.output) {
+    return (
+      `Chain step ${stepIndex + 1}: outputMode "file-only" requires an output path. ` +
+      `Set the \`output\` field to a file path, or use outputMode "inline".`
+    );
+  }
+  return undefined;
+}

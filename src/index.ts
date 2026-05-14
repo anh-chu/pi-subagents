@@ -23,6 +23,7 @@ import { loadCustomAgents } from "./custom-agents.js";
 import { GroupJoinManager } from "./group-join.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
+import { buildReadsBlock, createChainDir, injectOutputInstruction, resolveOutputPath, resolveStepOutput, snapshotOutputFile, substituteChainPlaceholders, validateStepIO } from "./chain-io.js";
 import { createOutputFilePath, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
@@ -775,9 +776,30 @@ ${guidelinesText}
                 minimum: 1,
               })
             ),
+            output: Type.Optional(
+              Type.String({
+                description: "File path to write this step's output to (relative to cwd or absolute). The agent is instructed to write its findings there. Use {chain_dir} to reference the shared per-run scratch directory.",
+              })
+            ),
+            output_mode: Type.Optional(
+              Type.Union(
+                [Type.Literal("inline"), Type.Literal("file-only")],
+                {
+                  description: '"inline" (default): include file content in chain result and pass to next step. "file-only": store to disk only; next step receives the file path, not its content.',
+                }
+              )
+            ),
+            reads: Type.Optional(
+              Type.Array(
+                Type.String({ description: "A file path to read (relative to cwd or absolute)." }),
+                {
+                  description: "Files to read at the start of this step and prepend to the prompt as context.",
+                }
+              )
+            ),
           }),
           {
-            description: "Sequential chain of agents. Each step receives the prior step output via {previous}.",
+            description: "Sequential chain of agents. Each step receives the prior step output via {previous}. Use output/reads for file-based handoff between steps.",
             minItems: 2,
           }
         )
@@ -819,7 +841,7 @@ ${guidelinesText}
           const name = getDisplayName(
             resolveType(step.subagent_type) ?? "general-purpose"
           );
-          const cleanPrompt = step.prompt.replace(/\{previous\}/g, "").trim();
+          const cleanPrompt = step.prompt.replace(/\{previous\}/g, "").replace(/\{chain_dir\}/g, "").trim();
           const preview =
             cleanPrompt.length > 45
               ? `${cleanPrompt.slice(0, 45)}…`
@@ -1233,17 +1255,35 @@ ${guidelinesText}
       model?: string;
       thinking?: string;
       max_turns?: number;
+      output?: string;
+      output_mode?: "inline" | "file-only";
+      reads?: string[];
     }>,
     topParams: any,
     signal: AbortSignal | undefined,
     onUpdate: any,
     ctx: any
   ) {
+    // Validate IO config for all steps before starting any work
+    for (let i = 0; i < chain.length; i++) {
+      const step = chain[i];
+      const ioError = validateStepIO(i, {
+        output: step.output,
+        outputMode: step.output_mode,
+        reads: step.reads,
+      });
+      if (ioError) return textResult(ioError);
+    }
+
+    // Create a per-run scratch directory (shared across all steps)
+    const chainDir = createChainDir();
+
     let previousOutput = "";
     const results: Array<{
       step: number;
       agent: string;
       output: string;
+      savedPath?: string;
       durationMs: number;
     }> = [];
 
@@ -1256,7 +1296,39 @@ ${guidelinesText}
       const resolvedStepType =
         resolveType(step.subagent_type) ?? "general-purpose";
       const stepDisplayName = getDisplayName(resolvedStepType);
-      const stepPrompt = step.prompt.replace(/\{previous\}/g, previousOutput);
+
+      // Substitute placeholders first, then resolve the output path.
+      // This ensures {chain_dir}/step.md resolves under the chain dir, not cwd.
+      const resolvedOutputPath = resolveOutputPath(
+        step.output
+          ? substituteChainPlaceholders(step.output, previousOutput, chainDir)
+          : undefined,
+        ctx.cwd,
+      );
+
+      // Snapshot the output file before the agent runs (to detect writes)
+      const outputSnapshot = snapshotOutputFile(resolvedOutputPath);
+
+      // Substitute placeholders in reads paths before resolving them
+      const resolvedReads = step.reads?.map((p) =>
+        substituteChainPlaceholders(p, previousOutput, chainDir)
+      );
+      const readsBlock = buildReadsBlock(resolvedReads, ctx.cwd);
+
+      // Substitute {previous} and {chain_dir} placeholders in the prompt
+      let stepPrompt = substituteChainPlaceholders(
+        step.prompt,
+        previousOutput,
+        chainDir,
+      );
+
+      // Prepend reads context
+      if (readsBlock) {
+        stepPrompt = readsBlock + stepPrompt;
+      }
+
+      // Append output instruction if an output path is configured
+      stepPrompt = injectOutputInstruction(stepPrompt, resolvedOutputPath);
 
       const customConfig = getAgentConfig(resolvedStepType);
       const stepParams = {
@@ -1356,26 +1428,50 @@ ${guidelinesText}
         return textResult(`Chain aborted at step ${i + 1}/${chain.length}.`);
       }
 
-      const stepOutput = record.result?.trim() ?? "";
-      previousOutput = stepOutput;
+      // Resolve step output: file-based if configured, otherwise in-memory
+      const inMemoryOutput = record.result?.trim() ?? "";
+      const { output: resolvedOutput, savedPath, saveError } = resolveStepOutput({
+        outputPath: resolvedOutputPath,
+        fallbackOutput: inMemoryOutput,
+        snapshot: outputSnapshot,
+      });
+
+      // For file-only mode, pass the raw file path so {previous} works as a path
+      const outputMode = step.output_mode ?? "inline";
+      if (outputMode === "file-only" && savedPath) {
+        previousOutput = savedPath;
+      } else {
+        previousOutput = resolvedOutput;
+      }
+
       results.push({
         step: i + 1,
         agent: stepDisplayName,
-        output: stepOutput,
+        output: outputMode === "file-only" && savedPath
+          ? `Output saved to: ${savedPath}`
+          : resolvedOutput,
+        savedPath,
         durationMs: stepDurationMs,
       });
+
+      // Warn about save errors without aborting the chain
+      if (saveError) {
+        console.warn(`[pi-subagents] Chain step ${i + 1} output file warning: ${saveError}`);
+      }
     }
 
     const totalMs = results.reduce((s, r) => s + r.durationMs, 0);
     const summary = results
       .map(
-        (r) =>
-          `Step ${r.step} (${r.agent}) — ${formatMs(r.durationMs)}:\n${r.output.slice(0, 200)}${r.output.length > 200 ? "…" : ""}`
+        (r) => {
+          const fileNote = r.savedPath ? `\n  → saved to ${r.savedPath}` : "";
+          return `Step ${r.step} (${r.agent}) — ${formatMs(r.durationMs)}:${fileNote}\n${r.output.slice(0, 200)}${r.output.length > 200 ? "…" : ""}`;
+        }
       )
       .join("\n\n---\n\n");
 
     return textResult(
-      `Chain completed in ${formatMs(totalMs)} (${chain.length} steps).\n\n${summary}`
+      `Chain completed in ${formatMs(totalMs)} (${chain.length} steps). Chain directory: ${chainDir}\n\n${summary}`
     );
   }
 
