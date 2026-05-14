@@ -23,7 +23,7 @@ import { loadCustomAgents } from "./custom-agents.js";
 import { GroupJoinManager } from "./group-join.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
-import { buildReadsBlock, createChainDir, createChainOutputTool, isAgentReadOnly, resolveOutputPath, resolveStepOutput, snapshotOutputFile, substituteChainPlaceholders, validateChainFileOnlyHandoff, validateStepIO } from "./chain-io.js";
+import { buildReadsBlock, createChainDir, createChainOutputTool, injectOutputInstruction, isAgentReadOnly, resolveOutputPath, resolveStepOutput, snapshotOutputFile, substituteChainPlaceholders, validateChainFileOnlyHandoff, validateStepIO } from "./chain-io.js";
 import { createOutputFilePath, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
@@ -1395,6 +1395,9 @@ ${guidelinesText}
       if (readsBlock) {
         stepPrompt = readsBlock + stepPrompt;
       }
+
+      // Inject output file instruction so the agent knows to call write_output
+      stepPrompt = injectOutputInstruction(stepPrompt, resolvedOutputPath);
 
       const customConfig = getAgentConfig(resolvedStepType);
 
