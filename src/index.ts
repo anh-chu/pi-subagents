@@ -1252,11 +1252,14 @@ Notes:
         }
       };
 
-      // Animate spinner at ~80ms (smooth rotation through 10 braille frames)
+      // Animate spinner at ~1s. Higher frequency (e.g. 80ms) causes visible
+      // flicker in the interactive TUI: each onUpdate() call can race pi's
+      // tool-call rendering reconciliation and momentarily show a raw fallback
+      // frame before the custom renderResult re-attaches.
       const spinnerInterval = setInterval(() => {
         spinnerFrame++;
         streamUpdate();
-      }, 80);
+      }, 1000);
 
       streamUpdate();
 
