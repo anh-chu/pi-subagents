@@ -18,11 +18,12 @@ import { Type } from "@sinclair/typebox";
 import { differsFromDefault, diffFromDefault } from "./agent-diff.js";
 import { AgentManager } from "./agent-manager.js";
 import { registerAgentModeCommands } from "./agent-mode.js";
-import { getAgentConversation, getDefaultExtensions, getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, setDefaultExtensions, setDefaultMaxTurns, setGraceTurns, steerAgent } from "./agent-runner.js";
+import { agentDepth, getAgentConversation, getDefaultExtensions, getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, setDefaultExtensions, setDefaultMaxTurns, setGraceTurns, steerAgent } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getDefaultAgentNames, getUserAgentNames, isDefaultsDisabled, registerAgents, resolveType, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { deleteGlobalActivity, setGlobalActivity } from "./global-registry.js";
+import { formatGrindStatus, GrindCounter } from "./grind-counter.js";
 import { GroupJoinManager } from "./group-join.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
@@ -281,6 +282,9 @@ export default function (pi: ExtensionAPI) {
   // ---- Agent activity tracking + widget ----
   const agentActivity = new Map<string, AgentActivity>();
 
+  // ---- Grind counter (session-local inline-work telemetry) ----
+  const grindCounter = new GrindCounter();
+
   // ---- Cancellable pending notifications ----
   // Holds notifications briefly so get_subagent_result can cancel them
   // before they reach pi.sendMessage (fire-and-forget).
@@ -499,12 +503,14 @@ export default function (pi: ExtensionAPI) {
 
   // Capture ctx from session_start for RPC spawn handler + start the scheduler.
   pi.on("session_start", async (_event, ctx) => {
+    grindCounter.reset();
     currentCtx = ctx;
     manager.clearCompleted();
     if (isSchedulingEnabled() && !scheduler.isActive()) startScheduler(ctx);
   });
 
   pi.on("session_before_switch", () => {
+    grindCounter.reset();
     manager.clearCompleted();
     scheduler.stop();
   });
@@ -533,6 +539,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
+    grindCounter.reset();
     unsubSpawnRpc();
     unsubStopRpc();
     unsubPingRpc();
@@ -628,9 +635,22 @@ export default function (pi: ExtensionAPI) {
   }
 
   // Grab UI context from first tool execution + clear lingering widget on new turn
-  pi.on("tool_execution_start", async (_event, ctx) => {
+  pi.on("tool_execution_start", async (event, ctx) => {
     widget.setUICtx(ctx.ui as UICtx);
     widget.onTurnStart();
+    if (agentDepth.getStore() !== undefined) return;
+    grindCounter.observeToolStart(event.toolCallId, event.toolName);
+  });
+
+  // Deliver non-blocking delegation nudges after the matching tool result.
+  pi.on("tool_result", (event, _ctx) => {
+    if (agentDepth.getStore() !== undefined) return;
+    const nudge = grindCounter.consumeNudge(event.toolCallId);
+    if (!nudge) return;
+    pi.sendMessage(
+      { customType: "grind-nudge", content: nudge.message, display: true },
+      { deliverAs: "steer" },
+    );
   });
 
   // Config tags surfaced to the invoking agent in the type list so it can
@@ -2394,6 +2414,13 @@ ${systemPrompt}
   pi.registerCommand("agents", {
     description: "Manage agents",
     handler: async (_args, ctx) => { await showAgentsMenu(ctx); },
+  });
+
+  pi.registerCommand("grind-status", {
+    description: "Show the current inline-work and bash streaks",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(formatGrindStatus(grindCounter.snapshot()), "info");
+    },
   });
 
   registerAgentModeCommands(pi);

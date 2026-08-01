@@ -42,6 +42,7 @@ The full capability list is below.
 - **Styled completion notifications** — background agent results render as themed, compact notification boxes (icon, stats, result preview) instead of raw XML. Expandable to show full output. Group completions render each agent individually
 - **Event bus** — lifecycle events (`subagents:created`, `started`, `completed`, `failed`, `steered`, `compacted`) emitted via `pi.events`, enabling other extensions to react to sub-agent activity
 - **Cross-extension RPC** — other pi extensions can spawn and stop subagents via the `pi.events` event bus (`subagents:rpc:ping`, `subagents:rpc:spawn`, `subagents:rpc:stop`). Standardized reply envelopes with protocol versioning. Emits `subagents:ready` on load
+- **Grind counter** — session-local telemetry that notices long runs of main-session inline tool calls (default 15) and consecutive bash debugging (default 8). It places a short delegation nudge into the next model context with a 25-call shared cooldown. Only the main session is observed; calling `Agent` resets the streak. Inspect current streaks with `/grind-status`. Counters reset with the session and are not persisted
 - **Schedule subagents** — pass `schedule` to the `Agent` tool to fire on cron / interval / one-shot. Session-scoped jobs with PID-locked persistence; results land via the same `subagent-notification` followUp path as manual background completions; manage via `/agents → Scheduled jobs`
 
 ## Install
@@ -318,6 +319,7 @@ Send a steering message to a running agent. The message interrupts after the cur
 | Command          | Description                                                              |
 | ---------------- | ------------------------------------------------------------------------ |
 | `/agents`        | Interactive agent management menu                                        |
+| `/grind-status`  | Show the current inline-work and bash streaks                            |
 | `/agents-view`   | Toggle the widget display between cards and tree                         |
 | `/feature`       | Full feature workflow: scout, plan, implement, review, fix-up               |
 | `/feature-light` | Lightweight workflow for small/scoped changes: implement, review, fix-up    |
