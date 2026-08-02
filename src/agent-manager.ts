@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import type { Model } from "@mariozechner/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { agentDepth, resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { getAgentAvailability } from "./agent-types.js";
 import { registerRecord, unregisterRecord } from "./global-registry.js";
 import type { AgentInvocation, AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage } from "./usage.js";
@@ -141,6 +142,11 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
+    const availability = getAgentAvailability(type);
+    if (availability.status === "disabled") {
+      throw new Error(`Agent "${availability.canonicalName}" is disabled.`);
+    }
+
     const id = randomUUID().slice(0, 17);
     const abortController = new AbortController();
     // Stamp depth synchronously here (inside the spawning agent's depth store);

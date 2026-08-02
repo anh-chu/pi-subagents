@@ -19,7 +19,7 @@ import { differsFromDefault, diffFromDefault } from "./agent-diff.js";
 import { AgentManager } from "./agent-manager.js";
 import { registerAgentModeCommands } from "./agent-mode.js";
 import { agentDepth, getAgentConversation, getDefaultExtensions, getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, setDefaultExtensions, setDefaultMaxTurns, setGraceTurns, steerAgent } from "./agent-runner.js";
-import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, getDefaultAgentNames, getUserAgentNames, isDefaultsDisabled, registerAgents, resolveType, setDefaultsDisabled } from "./agent-types.js";
+import { BUILTIN_TOOL_NAMES, getAgentAvailability, getAgentConfig, getAllTypes, getAvailableTypes, getDefaultAgentNames, getUserAgentNames, isDefaultsDisabled, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { deleteGlobalActivity, setGlobalActivity } from "./global-registry.js";
@@ -1029,14 +1029,32 @@ Notes:
       reloadCustomAgents();
 
       const rawType = params.subagent_type as SubagentType;
-      const resolved = resolveType(rawType);
-      const subagentType = resolved ?? "general-purpose";
-      const fellBack = resolved === undefined;
+
+      // Classify before any side-effect work (schedule/model/output/agent setup).
+      const availability = getAgentAvailability(rawType);
+
+      let subagentType: string;
+      let fellBack = false;
+      let customConfig: AgentConfig | undefined;
+
+      if (availability.status === "disabled") {
+        return textResult(`Agent "${availability.canonicalName}" is disabled and cannot be started. Re-enable it via /agents to use it.`);
+      }
+
+      if (availability.status === "unknown") {
+        const gpAvailability = getAgentAvailability("general-purpose");
+        if (gpAvailability.status === "disabled") {
+          return textResult(`Agent "general-purpose" is disabled and cannot be used as a fallback for unknown agent type "${rawType}". Re-enable it via /agents to use it.`);
+        }
+        subagentType = "general-purpose";
+        fellBack = true;
+        customConfig = gpAvailability.status === "available" ? gpAvailability.config : undefined;
+      } else {
+        subagentType = availability.canonicalName;
+        customConfig = availability.config;
+      }
 
       const displayName = getDisplayName(subagentType);
-
-      // Get agent config (if any)
-      const customConfig = getAgentConfig(subagentType);
 
       const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
 

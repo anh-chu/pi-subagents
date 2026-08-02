@@ -330,6 +330,25 @@ describe("SubagentScheduler — fire path", () => {
     }));
   });
 
+  it("keeps job enabled and emits error when manager.spawn rejects a disabled agent", async () => {
+    manager.spawn.mockImplementationOnce(() => { throw new Error('Agent "reviewer" is disabled.'); });
+    const job = scheduler.addJob({
+      name: "disabled-reviewer", description: "x", schedule: "1s",
+      subagent_type: "reviewer", prompt: "review me",
+    });
+    vi.advanceTimersByTime(1_000);
+
+    const stored = scheduler.list().find(j => j.id === job.id);
+    expect(stored?.enabled).toBe(true);
+    expect(stored?.lastStatus).toBe("error");
+    expect(pi.events.emit).not.toHaveBeenCalledWith("subagents:scheduled", expect.objectContaining({
+      type: "fired", jobId: job.id,
+    }));
+    expect(pi.events.emit).toHaveBeenCalledWith("subagents:scheduled", expect.objectContaining({
+      type: "error", jobId: job.id, error: 'Agent "reviewer" is disabled.',
+    }));
+  });
+
   // ── Status reflection from record.status (regression for bug #1) ────
   // The real AgentManager's promise *always* resolves (its .catch returns ""),
   // so the schedule's success/error must be inferred from `record.status`,

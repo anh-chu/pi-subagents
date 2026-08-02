@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   BUILTIN_TOOL_NAMES,
+  getAgentAvailability,
   getAgentConfig,
   getAvailableTypes,
   getConfig,
@@ -242,6 +243,58 @@ describe("agent type registry", () => {
 
       expect(isValidType("Plan")).toBe(false);
       expect(getAvailableTypes()).not.toContain("Plan");
+    });
+
+    it("getAgentAvailability returns available for enabled default type via lowercase input", () => {
+      const result = getAgentAvailability("explore");
+      expect(result.status).toBe("available");
+      if (result.status !== "available") return;
+      expect(result.canonicalName).toBe("Explore");
+      expect(result.config.name).toBe("Explore");
+    });
+
+    it("getAgentAvailability returns disabled with canonical name for disabled project override", () => {
+      const agents = new Map([["Plan", makeAgentConfig({
+        name: "Plan",
+        enabled: false,
+        source: "project",
+      })]]);
+      registerAgents(agents);
+
+      const result = getAgentAvailability("pLaN");
+      expect(result.status).toBe("disabled");
+      if (result.status !== "disabled") return;
+      expect(result.canonicalName).toBe("Plan");
+      expect(result.config.name).toBe("Plan");
+      expect(result.config.enabled).toBe(false);
+    });
+
+    it("getAgentAvailability returns unknown for absent name without synthetic config", () => {
+      const result = getAgentAvailability("not-an-agent");
+      expect(result).toEqual({ status: "unknown" });
+      expect(result).not.toHaveProperty("config");
+    });
+
+    it("resolveType still returns canonical name for disabled entries", () => {
+      const agents = new Map([["Plan", makeAgentConfig({
+        name: "Plan",
+        enabled: false,
+      })]]);
+      registerAgents(agents);
+
+      expect(resolveType("plan")).toBe("Plan");
+    });
+
+    it("isValidType is true only for available agents", () => {
+      expect(isValidType("Explore")).toBe(true);
+
+      const agents = new Map([["Plan", makeAgentConfig({
+        name: "Plan",
+        enabled: false,
+      })]]);
+      registerAgents(agents);
+      expect(isValidType("Plan")).toBe(false);
+      expect(isValidType("unknown-agent")).toBe(false);
     });
 
     it("general-purpose can be disabled but fallback still works", () => {

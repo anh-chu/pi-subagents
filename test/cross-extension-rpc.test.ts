@@ -128,6 +128,21 @@ describe("cross-extension RPC", () => {
       expect(reply).toHaveBeenCalledWith({ success: false, error: "unknown agent type" });
     });
 
+    it("returns disabled-agent error without an agent id", async () => {
+      (manager.spawn as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error('Agent "reviewer" is disabled.');
+      });
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:spawn:reply:req-s4-disabled", reply);
+      events.emit("subagents:rpc:spawn", {
+        requestId: "req-s4-disabled", type: "reviewer", prompt: "review me",
+      });
+
+      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+      expect(reply).toHaveBeenCalledWith({ success: false, error: 'Agent "reviewer" is disabled.' });
+    });
+
     it("scopes replies — other requestIds do not receive it", async () => {
       registerRpcHandlers(deps);
       const wrongReply = vi.fn();

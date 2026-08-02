@@ -7,8 +7,8 @@
  * thinking level, tool set). The previous conversation is not carried over.
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import type { Model } from "@mariozechner/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { getAgentConfig } from "./agent-types.js";
 import { detectEnv } from "./env.js";
 import { resolveModel } from "./model-resolver.js";

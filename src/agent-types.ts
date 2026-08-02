@@ -91,11 +91,31 @@ export function getUserAgentNames(): string[] {
     .map(([name]) => name);
 }
 
+/** Three-state availability of a requested agent type. */
+export type AgentAvailability =
+  | { status: "available"; canonicalName: string; config: AgentConfig }
+  | { status: "disabled"; canonicalName: string; config: AgentConfig }
+  | { status: "unknown" };
+
+/**
+ * Resolve requested agent type name to its availability state.
+ * Reuses the same case-insensitive lookup as resolveType/getAgentConfig.
+ */
+export function getAgentAvailability(name: string): AgentAvailability {
+  const key = resolveKey(name);
+  if (!key) {
+    return { status: "unknown" };
+  }
+  const config = agents.get(key)!;
+  if (config.enabled === false) {
+    return { status: "disabled", canonicalName: key, config };
+  }
+  return { status: "available", canonicalName: key, config };
+}
+
 /** Check if a type is valid and enabled (case-insensitive). */
 export function isValidType(type: string): boolean {
-  const key = resolveKey(type);
-  if (!key) return false;
-  return agents.get(key)?.enabled !== false;
+  return getAgentAvailability(type).status === "available";
 }
 
 /** Tool names required for memory management. */

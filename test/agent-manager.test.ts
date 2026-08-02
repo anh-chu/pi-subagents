@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../src/agent-manager.js";
-import type { AgentRecord } from "../src/types.js";
+import { registerAgents } from "../src/agent-types.js";
+import type { AgentConfig, AgentRecord } from "../src/types.js";
 
 vi.mock("../src/agent-runner.js", async () => ({
   runAgent: vi.fn(),
@@ -410,6 +411,72 @@ describe("AgentManager — nesting depth", () => {
     expect(manager.getRecord(nested)!.depth).toBe(2);
     expect(manager.getRecord(nested)!.parentId).toBe("p1");
     expect(manager.getRecord(top)!.parentId).toBeUndefined();
+  });
+});
+
+describe("AgentManager — disabled definitions", () => {
+  const blockedConfig: AgentConfig = {
+    name: "blocked",
+    description: "blocked agent",
+    extensions: true,
+    skills: true,
+    systemPrompt: "You are blocked.",
+    promptMode: "append",
+    enabled: false,
+  } as AgentConfig;
+
+  const allowedConfig: AgentConfig = {
+    ...blockedConfig,
+    name: "allowed",
+    description: "allowed agent",
+    enabled: true,
+  };
+
+  beforeEach(() => {
+    vi.mocked(runAgent).mockReset();
+  });
+
+  afterEach(() => {
+    registerAgents(new Map());
+  });
+
+  it("rejects disabled agents case-insensitively before side effects", () => {
+    registerAgents(new Map([["blocked", blockedConfig]]));
+    const manager = new AgentManager();
+    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+
+    expect(() =>
+      manager.spawn(mockPi, mockCtx, "BLOCKED", "test", {
+        description: "test",
+      })
+    ).toThrow('Agent "blocked" is disabled.');
+
+    expect(manager.listAgents()).toEqual([]);
+    expect(runAgent).not.toHaveBeenCalled();
+
+    manager.dispose();
+  });
+
+  it("registered enabled definition still spawns normally", async () => {
+    registerAgents(new Map([["allowed", allowedConfig]]));
+    const manager = new AgentManager();
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "done",
+      session: mockSession(),
+      aborted: false,
+      steered: false,
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "ALLOWED", "test", {
+      description: "test",
+    });
+
+    expect(id).toBeDefined();
+    expect(manager.listAgents()).toHaveLength(1);
+    expect(runAgent).toHaveBeenCalledOnce();
+
+    manager.abort(id);
+    manager.dispose();
   });
 });
 
