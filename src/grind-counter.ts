@@ -15,7 +15,7 @@ export interface GrindCounterSettings {
 }
 
 export const DEFAULT_GRIND_COUNTER_SETTINGS: GrindCounterSettings = {
-  inlineThreshold: 15,
+  inlineThreshold: 25,
   bashThreshold: 8,
   cooldownCalls: 25,
   neutralTools: ["get_subagent_result", "steer_subagent"],

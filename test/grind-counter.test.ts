@@ -8,28 +8,28 @@ function observe(counter: GrindCounter, index: number, toolName: string) {
 }
 
 describe("GrindCounter", () => {
-  it("nudges once at the default general threshold (15) and not before", () => {
+  it("nudges once at the default general threshold (25) and not before", () => {
     const counter = new GrindCounter();
-    for (let i = 1; i <= 14; i++) {
+    for (let i = 1; i <= 24; i++) {
       expect(observe(counter, i, "read")).toBeUndefined();
     }
-    const nudge = observe(counter, 15, "read");
+    const nudge = observe(counter, 25, "read");
     expect(nudge?.kind).toBe("inline");
-    expect(nudge?.inlineStreak).toBe(15);
-    expect(nudge?.message).toContain("15 consecutive inline calls");
+    expect(nudge?.inlineStreak).toBe(25);
+    expect(nudge?.message).toContain("25 consecutive inline calls");
   });
 
-  it("suppresses repeats during the default cooldown and allows a fresh nudge at 40", () => {
+  it("suppresses repeats during the default cooldown and allows a fresh nudge at 50", () => {
     const counter = new GrindCounter();
-    for (let i = 1; i <= 15; i++) {
+    for (let i = 1; i <= 25; i++) {
       observe(counter, i, "read");
     }
-    for (let i = 16; i <= 39; i++) {
+    for (let i = 26; i <= 49; i++) {
       expect(observe(counter, i, "read")).toBeUndefined();
     }
-    const nudge = observe(counter, 40, "read");
+    const nudge = observe(counter, 50, "read");
     expect(nudge?.kind).toBe("inline");
-    expect(nudge?.message).toContain("40 consecutive inline calls");
+    expect(nudge?.message).toContain("50 consecutive inline calls");
   });
 
   it("resets counters and cooldown on Agent at raw call 10", () => {
@@ -48,18 +48,18 @@ describe("GrindCounter", () => {
 
   it("lets a new streak nudge at its own threshold after Agent clears cooldown", () => {
     const counter = new GrindCounter();
-    for (let i = 1; i <= 15; i++) {
+    for (let i = 1; i <= 25; i++) {
       if (observe(counter, i, "read")) {
-        // consume the nudge at 15
+        // consume the nudge at 25
       }
     }
     counter.observeToolStart("agent", "Agent");
-    for (let i = 1; i <= 14; i++) {
+    for (let i = 1; i <= 24; i++) {
       expect(observe(counter, i, "read")).toBeUndefined();
     }
-    const nudge = observe(counter, 15, "read");
+    const nudge = observe(counter, 25, "read");
     expect(nudge?.kind).toBe("inline");
-    expect(nudge?.inlineStreak).toBe(15);
+    expect(nudge?.inlineStreak).toBe(25);
   });
 
   it("nudges at 8 consecutive bash calls with the targeted message", () => {
