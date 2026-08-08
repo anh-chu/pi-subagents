@@ -1901,10 +1901,9 @@ Notes:
       menuOptions = ["Edit", "Disable", "Delete", "Back"];
     }
 
-    // Offer diff view + selective revert for replace-mode overrides that diverge from the bundled default
+    // Offer combined diff view + selective revert for replace-mode overrides that diverge from the bundled default
     if (hasDiff) {
-      menuOptions.splice(menuOptions.indexOf("Back"), 0, "View diff vs default");
-      menuOptions.splice(menuOptions.indexOf("Back"), 0, "Revert field to default…");
+      menuOptions.splice(menuOptions.indexOf("Back"), 0, "View diff vs default / revert field…");
     }
     // Always offer a direct background spawn (no orchestrator prompt needed).
     menuOptions.splice(menuOptions.indexOf("Back"), 0, "Spawn (background)");
@@ -1943,59 +1942,54 @@ Notes:
       await disableAgent(ctx, name);
     } else if (choice === "Enable") {
       await enableAgent(ctx, name);
-    } else if (choice === "View diff vs default") {
-      const entries = diffFromDefault(cfg);
-      if (!entries || entries.length === 0) {
-        ctx.ui.notify("No differences found.", "info");
-      } else {
-        const lines = [
-          `${name} — differences from bundled default`,
-          "(read-only — this view is for inspection; edits made here are discarded)\n",
-        ];
-        const maxField = Math.max(...entries.map(e => e.field.length));
-        for (const e of entries) {
-          if (e.field === "System prompt") {
-            lines.push(`${e.field}:`);
-            lines.push(e.local); // pre-formatted multi-line diff block
-            lines.push("");
-          } else {
-            lines.push(`${e.field.padEnd(maxField)}  override: ${e.local}`);
-            if (e.default) lines.push(`${''.padEnd(maxField)}  default:   ${e.default}`);
-          }
-        }
-        // Show via editor for scrollable read-only display; discard any result
-        await ctx.ui.editor(`${name} diff (read-only)`, lines.join("\n"));
-      }
-    } else if (choice === "Revert field to default…") {
-      await revertFieldFlow(ctx, name);
+    } else if (choice === "View diff vs default / revert field…") {
+      await viewDiffAndRevertFlow(ctx, name);
     } else if (choice === "Spawn (background)") {
       await spawnBackgroundFromMenu(ctx, name, cfg);
     }
   }
 
   /**
-   * Repeatedly let the user pick one differing field and revert just that
-   * field in the override .md file to the bundled default's value, leaving
+   * Merged diff/revert flow: show the full diff vs the bundled default (read-only,
+   * for inspection), then let the user pick one differing field at a time and
+   * revert it in the override .md file to the bundled default's value, leaving
    * every other override in the file untouched. Loops until the user picks
-   * "Done" or no differences remain.
+   * "Done" or no differences remain, re-showing the diff before each field pick
+   * so it stays in sync with what was just reverted.
    */
-  async function revertFieldFlow(ctx: ExtensionCommandContext, name: string) {
+  async function viewDiffAndRevertFlow(ctx: ExtensionCommandContext, name: string) {
     for (;;) {
       const cfg = getAgentConfig(name);
       if (!cfg) return;
-      const file = findAgentFile(name);
-      if (!file) {
-        ctx.ui.notify(`No override file found for "${name}".`, "warning");
-        return;
-      }
-      const def = DEFAULT_AGENTS.get(name);
-      if (!def) {
-        ctx.ui.notify(`No bundled default for "${name}".`, "warning");
-        return;
-      }
       const entries = diffFromDefault(cfg);
       if (!entries || entries.length === 0) {
         ctx.ui.notify("No differences remain.", "info");
+        return;
+      }
+
+      const file = findAgentFile(name);
+      const def = DEFAULT_AGENTS.get(name);
+
+      const lines = [
+        `${name} — differences from bundled default`,
+        "(read-only — pick a field on the next screen to revert it, or Done to close)\n",
+      ];
+      const maxField = Math.max(...entries.map(e => e.field.length));
+      for (const e of entries) {
+        if (e.field === "System prompt") {
+          lines.push(`${e.field}:`);
+          lines.push(e.local); // pre-formatted multi-line diff block
+          lines.push("");
+        } else {
+          lines.push(`${e.field.padEnd(maxField)}  override: ${e.local}`);
+          if (e.default) lines.push(`${''.padEnd(maxField)}  default:   ${e.default}`);
+        }
+      }
+      // Show via editor for scrollable read-only display; discard any result
+      await ctx.ui.editor(`${name} diff (read-only)`, lines.join("\n"));
+
+      if (!file || !def) {
+        // No override file or no bundled default to revert against — inspection only.
         return;
       }
 
