@@ -1,47 +1,59 @@
 /**
- * agent-mode.ts — Switch the persona (system prompt, model, tools, thinking
- * level) the current session behaves as, without ever clearing context.
+ * agent-mode.ts — Switch the current session into a fresh session configured
+ * as a selected agent (model, tools, thinking, system prompt).
  *
- * Design: the user manages their own context (via /compact, /fork, or
- * starting a new session when they actually want a clean slate). This
- * extension never does that automatically. Every switch — /agent-mode,
- * @@agent_name, agent-mode-off, @@main — is the same live, in-place
- * operation: swap model/tools/thinking via pi.setModel()/setActiveTools()/
- * setThinkingLevel() and seed a hidden system-prompt message, all in the
- * current session. Nothing is ever replaced or discarded.
+ * Heavy by design: a new session per switch, not a live in-place swap.
+ * Reasons:
+ *  1. ctx.newSession()/switchSession() (real session replacement) only exist
+ *     on ExtensionCommandContext, which the SDK only hands to registerCommand
+ *     handlers — there's no live-swap equivalent that's actually safe from
+ *     other contexts.
+ *  2. Injecting a new persona's system prompt into an existing session's
+ *     history without removing the old one just stacks conflicting personas
+ *     in context forever (append-only session log, no way to edit/replace a
+ *     past entry short of rewinding). A fresh session avoids that entirely.
  *
- * (An earlier version used ctx.newSession() to start a brand-new session per
- * switch. That's a heavier, session-replacing operation with its own sharp
- * edges — e.g. ctx.newSession() is only reachable from registerCommand
- * handlers, not from "input" event handlers, which is why @@name couldn't
- * use it — and it fought the "user self-manages context" goal by forcibly
- * clearing it. Dropped in favor of the simpler, consistent live-switch below.)
+ * The user manages their own context: nothing is auto-summarized or copied
+ * over. /agent-mode's confirm prompt reminds you to hand off anything
+ * important yourself (as your first message in the new session). The new
+ * session gets a small persistent widget breadcrumb (previous session id +
+ * its first user message + its last agent reply) so you can find your way
+ * back, and /agent-mode-off switches you to that exact previous session
+ * (not a reconstructed guess at prior state).
+ *
+ * "@@agent_name" / "@@main" are autocomplete expansions, not magic chat
+ * triggers: typing "@@" opens a completion list that inserts the real
+ * "/agent-mode <name> " or "/agent-mode-off " text into the editor, which
+ * then dispatches normally on Enter. This is deliberate, not a workaround
+ * we gave up on: the "input" event (which would let an extension intercept
+ * "@@name" as already-submitted text) fires *after* the SDK's own
+ * slash-command dispatch already ran and was skipped because the text
+ * didn't start with "/" (see agent-session.js `prompt()`:
+ * `if (text.startsWith("/")) { tryExecuteExtensionCommand(...) }` happens
+ * before `emitInput(...)`). By the time an "input" handler sees "@@name",
+ * it's too late to route it through the real command dispatcher —
+ * registerCommand-only capabilities like ctx.newSession() are simply not
+ * reachable from there. Expanding via autocomplete sidesteps this: the
+ * actual slash-command text is what gets submitted.
  */
 
 import type { Model } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { getAgentConfig } from "./agent-types.js";
+import type { AutocompleteItem, AutocompleteProvider } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import { getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { detectEnv } from "./env.js";
 import { resolveModel } from "./model-resolver.js";
 import { buildAgentPrompt } from "./prompts.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { AgentConfig, ThinkingLevel } from "./types.js";
 
-/** Model/tools/thinking captured right before the first agent-mode switch,
- *  so turning agent-mode off can restore them. */
-export interface PreviousAgentState {
-  model?: Model<any>;
-  tools?: string[];
-  thinking?: ThinkingLevel;
-}
-
 export interface AgentModeState {
   /** Name of the agent the user selected, or undefined for no active override. */
   activeAgent?: string;
   /** Display name used in status/toasts. */
   displayName?: string;
-  /** State to restore on agent-mode-off / "@@main". */
-  previous?: PreviousAgentState;
+  /** Session file to return to via /agent-mode-off. */
+  parentSessionFile?: string;
 }
 
 /** Per-extension-instance state. Only one agent-mode can be active at a time. */
@@ -60,41 +72,25 @@ export function clearAgentMode(): void {
 }
 
 /**
- * Snapshot current model/tools/thinking, but only on the transition from
- * "no agent-mode" to "agent-mode". Chained switches (agent A -> agent B ->
- * off) then restore the true original state, not agent A's — matches the
- * pattern used by the SDK's preset.ts example.
+ * Model/tools/thinking to apply once the replacement session's OWN extension
+ * instance receives "session_start". Session replacement creates a brand-new
+ * extension instance with its own `pi` handle; the old `pi`/`ctx` captured
+ * in enterAgentMode() is invalidated as soon as the old session tears down,
+ * so live calls like pi.setModel() cannot be made from there for the new
+ * session. This module-level variable is the one thing that safely crosses
+ * the instance boundary: the extension module itself is not re-imported on
+ * session replacement, only its default export factory function is invoked
+ * again (registering a fresh session_start handler below that reads and
+ * clears this).
  */
-function capturePreviousState(
-  model: Model<any> | undefined,
-  tools: string[],
-  thinking: ThinkingLevel | undefined,
-): PreviousAgentState {
-  return currentMode.previous ?? { model, tools, thinking };
+interface PendingAgentModeApply {
+  model?: Model<any>;
+  tools?: string[];
+  thinking?: ThinkingLevel;
 }
+let pendingApply: PendingAgentModeApply | undefined;
 
-/** Restore the pre-agent-mode model/tools/thinking live, in place. Context
- *  (conversation history) is never touched — it was never removed. */
-async function restorePreviousAgentState(pi: ExtensionAPI): Promise<void> {
-  const prev = currentMode.previous;
-  clearAgentMode();
-  if (!prev) return;
-  if (prev.model) {
-    try {
-      await pi.setModel(prev.model);
-    } catch {
-      // Ignore — leave whatever model is currently active.
-    }
-  }
-  if (prev.thinking) {
-    pi.setThinkingLevel(prev.thinking);
-  }
-  if (prev.tools) {
-    pi.setActiveTools(prev.tools);
-  }
-}
-
-/** Build the system prompt for an agent-mode switch. */
+/** Build the system prompt for the new agent-mode session. */
 export async function buildAgentModePrompt(
   pi: ExtensionAPI,
   config: AgentConfig,
@@ -109,7 +105,7 @@ export async function buildAgentModePrompt(
 }
 
 /**
- * Resolve the effective model for an agent-mode switch.
+ * Resolve the effective model for an agent-mode session.
  * Returns the Model, or a string error if unavailable.
  */
 export function resolveAgentModeModel(
@@ -124,7 +120,7 @@ export function resolveAgentModeModel(
 }
 
 /**
- * Compute the tool allowlist for an agent-mode switch.
+ * Compute the tool allowlist for the agent-mode session.
  * Mirrors agent-runner logic but simplified: built-ins + ext tools (all when
  * extensions true), minus disallowedTools.
  */
@@ -136,11 +132,6 @@ export async function resolveAgentModeTools(
   const allTools = ctx.getAllTools().map(t => t.name);
   const builtinToolNames = config.builtinToolNames ?? ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
-  // Extension tools: when extensions is true, include all loaded extension tools.
-  // When extensions is false, include none. When a list, include tools from
-  // listed extensions. (We keep it simple here: true → all ext tools, false → none,
-  // string[] → all ext tools whose extension name matches — this is a pragmatic
-  // approximation; ext: narrowing applies at child-agent time if needed.)
   const extensionTools: string[] = [];
   if (config.extensions !== false) {
     const allExtTools = ctx.getAllTools().filter(t => t.sourceInfo?.origin === "package" || t.sourceInfo?.origin === "top-level");
@@ -163,7 +154,6 @@ export async function resolveAgentModeTools(
   const allowed = new Set([...builtinToolNames, ...extensionTools]);
   const final = [...allowed].filter(t => !disallowed.has(t.toLowerCase()));
 
-  // Safety: if a requested tool does not exist, drop it rather than erroring.
   const existing = new Set(allTools);
   return final.filter(t => existing.has(t));
 }
@@ -175,116 +165,231 @@ export interface AgentModeEntryData {
   tools: string[];
 }
 
-/**
- * Switch the current session's persona live, in place. Used by both the
- * /agent-mode command and the @@agent_name chat shorthand — they are
- * identical operations; only the entry point (slash command vs. raw input)
- * differs. Never touches conversation history.
- */
-export async function switchAgentMode(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  agentName: string,
-): Promise<{ ok: true; displayName: string } | { ok: false; message: string }> {
-  const config = getAgentConfig(agentName);
-  if (!config) return { ok: false, message: `Unknown agent type: "${agentName}"` };
-  if (config.enabled === false) return { ok: false, message: `Agent "${agentName}" is disabled.` };
+function truncate(text: string | undefined, max = 160): string | undefined {
+  if (!text) return undefined;
+  const t = text.trim().replace(/\s+/g, " ");
+  if (!t) return undefined;
+  return t.length > max ? `${t.slice(0, max)}\u2026` : t;
+}
 
-  const previous = capturePreviousState(ctx.model, pi.getActiveTools(), pi.getThinkingLevel());
+/** Pull the first text block out of a session message entry, if any. */
+function messageText(entry: any): string | undefined {
+  if (!entry || entry.type !== "message") return undefined;
+  const content = entry.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const textBlock = content.find((b: any) => b?.type === "text");
+    return textBlock?.text;
+  }
+  return undefined;
+}
+
+/**
+ * Build the "switched from" breadcrumb shown as a persistent widget in the
+ * new session: previous session id, its first user message, its last agent
+ * reply. Read-only, informational — never sent to the model.
+ */
+function buildBreadcrumb(ctx: ExtensionCommandContext): string[] {
+  const entries = ctx.sessionManager.getEntries() as any[];
+  const firstUser = entries.find(e => e.type === "message" && e.message?.role === "user");
+  const lastAgent = [...entries].reverse().find(e => e.type === "message" && e.message?.role === "assistant");
+  const lines = [`agent-mode: switched from ${ctx.sessionManager.getSessionId()}`];
+  const firstText = truncate(messageText(firstUser));
+  const lastText = truncate(messageText(lastAgent));
+  if (firstText) lines.push(`\u2192 ${firstText}`);
+  if (lastText) lines.push(`\u2190 ${lastText}`);
+  lines.push("/agent-mode-off to return");
+  return lines;
+}
+
+/**
+ * Enter agent-mode: create a fresh session and configure it to behave like the
+ * selected agent. Warns the user that this is a brand-new session.
+ */
+export async function enterAgentMode(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  agentName: string,
+): Promise<void> {
+  const config = getAgentConfig(agentName);
+  if (!config) {
+    ctx.ui.notify(`Unknown agent type: "${agentName}"`, "error");
+    return;
+  }
+  if (config.enabled === false) {
+    ctx.ui.notify(`Agent "${agentName}" is disabled.`, "warning");
+    return;
+  }
+
+  const confirm = await ctx.ui.confirm(
+    "Switch to agent-mode session?",
+    `This starts a brand-new session configured as "${agentName}". Nothing carries over automatically — ` +
+      `if there's anything to hand off, say so as your first message once switched. Continue?`,
+  );
+  if (!confirm) {
+    ctx.ui.notify("Agent-mode switch cancelled.", "info");
+    return;
+  }
+
   const displayName = config.displayName ?? config.name;
   const systemPrompt = await buildAgentModePrompt(pi, config, ctx.cwd);
+
+  // Resolve model, tools, and the breadcrumb BEFORE calling ctx.newSession().
+  // The setup() callback below runs after the old session has already been
+  // torn down (teardownCurrent), which invalidates the pre-replacement `pi` /
+  // `ctx` handles. Calling anything session-bound on them from inside setup()
+  // throws synchronously, which the host treats as a fatal runtime error and
+  // immediately process.exit()s the whole TUI. Precompute here instead and
+  // just close over the plain results.
   const modelOrError = config.model
     ? resolveAgentModeModel(config, undefined, ctx.modelRegistry as any)
     : undefined;
   const resolvedModel = typeof modelOrError !== "string" && modelOrError ? modelOrError : undefined;
   const tools = await resolveAgentModeTools(pi, config, pi);
+  const breadcrumb = buildBreadcrumb(ctx);
+  const parentSessionFile = ctx.sessionManager.getSessionFile();
 
-  if (resolvedModel) {
-    const ok = await pi.setModel(resolvedModel);
-    if (!ok) {
-      pi.appendEntry("agent-mode-warning", { message: `No API key for ${resolvedModel.provider}/${resolvedModel.id}` });
-    }
-  }
-  if (config.thinking) {
-    pi.setThinkingLevel(config.thinking);
-  }
-  pi.setActiveTools(tools);
-  pi.sendMessage({
-    customType: "agent-mode-instructions",
-    content: [{ type: "text", text: systemPrompt }],
-    display: false,
+  // setup(sessionManager) can only persist session-log entries — it cannot
+  // switch the live model/tools/thinking (see PendingAgentModeApply doc).
+  // Stash what to apply and let the new instance's own "session_start"
+  // handler (registered in registerAgentModeCommands) apply it via its own
+  // valid `pi`.
+  pendingApply = { model: resolvedModel, tools, thinking: config.thinking };
+
+  const result = await ctx.newSession({
+    parentSession: parentSessionFile,
+    setup: async (sessionManager) => {
+      sessionManager.appendCustomEntry("agent-mode-config", {
+        agentName: config.name,
+        displayName,
+        systemPrompt,
+        tools,
+      } as AgentModeEntryData);
+
+      // Seed the conversation with the agent's system prompt so the first user
+      // turn sees it. Stored as a custom message entry with display=false.
+      sessionManager.appendCustomMessageEntry(
+        "agent-mode-instructions",
+        [{ type: "text", text: systemPrompt }],
+        false,
+        undefined,
+      );
+    },
+    withSession: async (replacementCtx) => {
+      replacementCtx.ui.setEditorText("");
+      replacementCtx.ui.setWidget("agent-mode", breadcrumb);
+      replacementCtx.ui.notify(`Switched to ${displayName} mode. New session started.`, "info");
+    },
   });
-  pi.appendEntry("agent-mode-config", { agentName: config.name, displayName, systemPrompt, tools } as AgentModeEntryData);
 
-  setAgentMode({ activeAgent: config.name, displayName, previous });
-  return { ok: true, displayName };
+  if (result.cancelled) {
+    pendingApply = undefined;
+    ctx.ui.notify("Agent-mode switch cancelled.", "info");
+    return;
+  }
+
+  setAgentMode({ activeAgent: config.name, displayName, parentSessionFile });
 }
 
-/** Register /agent-mode, /agent-mode-off, and the @@name / @@main input shorthand. */
+/** Register /agent-mode, /agent-mode-off, and the "@@" autocomplete shorthand. */
 export function registerAgentModeCommands(pi: ExtensionAPI): void {
-  // "@@agent_name" / "@@main" quick-switch shorthand, typed directly into
-  // the chat input (no leading "/"). Same operation as the slash commands
-  // below — just a faster entry point for the same live, context-preserving
-  // switch.
-  pi.on("input", async (event, ctx) => {
-    if (event.source === "extension") {
-      return { action: "continue" };
-    }
-    const text = event.text.trim();
-
-    if (/^@@main$/i.test(text)) {
-      if (!currentMode.activeAgent) {
-        ctx.ui.notify("Not currently in agent-mode.", "info");
-        return { action: "handled" };
+  // Applies a pending model/tools/thinking switch queued by enterAgentMode()
+  // just before it called ctx.newSession(). Runs once per fresh instance,
+  // using this instance's own (valid) pi, then clears the flag.
+  pi.on("session_start", async () => {
+    if (!pendingApply) return;
+    const { model, tools, thinking } = pendingApply;
+    pendingApply = undefined;
+    if (model) {
+      try {
+        const ok = await pi.setModel(model);
+        if (!ok) {
+          pi.appendEntry("agent-mode-warning", { message: `No API key for ${model.provider}/${model.id}` });
+        }
+      } catch {
+        // Ignore — leave the session on whatever default model it started with.
       }
-      await restorePreviousAgentState(pi);
-      ctx.ui.notify("Back to main. Restored previous model/tools/thinking.", "info");
-      return { action: "handled" };
     }
+    if (thinking) {
+      pi.setThinkingLevel(thinking);
+    }
+    if (tools) {
+      pi.setActiveTools(tools);
+    }
+  });
 
-    const match = text.match(/^@@(\S+)\s*([\s\S]*)$/);
-    if (!match) {
-      return { action: "continue" };
-    }
-    const [, agentName, rest] = match;
-    const result = await switchAgentMode(pi, ctx, agentName);
-    if (!result.ok) {
-      ctx.ui.notify(result.message, "error");
-      return { action: "handled" };
-    }
-    ctx.ui.notify(`Switched to ${result.displayName} mode.`, "info");
-    if (rest.trim()) {
-      pi.sendUserMessage(rest.trim());
-    }
-    return { action: "handled" };
+  // "@@agent_name" / "@@main" autocomplete: typing "@@" opens a completion
+  // list; accepting an item inserts the real "/agent-mode <name> " or
+  // "/agent-mode-off " text into the editor (does not submit by itself —
+  // Enter still dispatches it as a normal slash command). See the module
+  // doc comment for why this can't be a direct chat-text trigger instead.
+  pi.on("session_start", async (_event, ctx) => {
+    ctx.ui.addAutocompleteProvider((current: AutocompleteProvider): AutocompleteProvider => ({
+      async getSuggestions(lines, cursorLine, cursorCol, options) {
+        const line = lines[cursorLine] ?? "";
+        const before = line.slice(0, cursorCol);
+        const match = before.match(/@@(\S*)$/);
+        if (!match) return current.getSuggestions(lines, cursorLine, cursorCol, options);
+
+        const query = match[1].toLowerCase();
+        const items: AutocompleteItem[] = [];
+        if ("main".startsWith(query)) {
+          items.push({ value: "main", label: "@@main", description: "Switch back to the previous session" });
+        }
+        for (const name of getAvailableTypes()) {
+          if (!name.toLowerCase().includes(query)) continue;
+          const config = getAgentConfig(name);
+          items.push({ value: name, label: `@@${name}`, description: config?.displayName ?? config?.name ?? name });
+        }
+        if (items.length === 0) return current.getSuggestions(lines, cursorLine, cursorCol, options);
+        return { items, prefix: `@@${match[1]}` };
+      },
+      applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+        const line = lines[cursorLine] ?? "";
+        const before = line.slice(0, cursorCol);
+        const at = before.lastIndexOf(prefix);
+        if (at === -1) return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+
+        const replacement = item.value === "main" ? "/agent-mode-off " : `/agent-mode ${item.value} `;
+        const newLine = line.slice(0, at) + replacement + line.slice(cursorCol);
+        const newLines = [...lines];
+        newLines[cursorLine] = newLine;
+        return { lines: newLines, cursorLine, cursorCol: at + replacement.length };
+      },
+      shouldTriggerFileCompletion: current.shouldTriggerFileCompletion?.bind(current),
+    }));
   });
 
   pi.registerCommand("agent-mode", {
-    description: "Switch this session's persona (model/tools/thinking/system-prompt); keeps context",
+    description: "Switch to a fresh session configured as a subagent",
     handler: async (args, ctx) => {
       const name = args.trim();
       if (!name) {
-        ctx.ui.notify("Usage: /agent-mode <agent-name>", "warning");
+        ctx.ui.notify("Usage: /agent-mode <agent-name> (or type @@ for a picker)", "warning");
         return;
       }
-      const result = await switchAgentMode(pi, ctx, name);
-      if (!result.ok) {
-        ctx.ui.notify(result.message, "error");
-        return;
-      }
-      ctx.ui.notify(`Switched to ${result.displayName} mode.`, "info");
+      await enterAgentMode(pi, ctx, name);
     },
   });
 
   pi.registerCommand("agent-mode-off", {
-    description: "Restore the model/tools/thinking active before agent-mode switched",
+    description: "Switch back to the session you were in before agent-mode",
     handler: async (_args, ctx) => {
-      if (!currentMode.activeAgent) {
+      if (!currentMode.activeAgent || !currentMode.parentSessionFile) {
         ctx.ui.notify("Not currently in agent-mode.", "info");
         return;
       }
-      await restorePreviousAgentState(pi);
-      ctx.ui.notify("Back to main. Restored previous model/tools/thinking.", "info");
+      const target = currentMode.parentSessionFile;
+      const result = await ctx.switchSession(target, {
+        withSession: async (replacementCtx) => {
+          replacementCtx.ui.notify("Back to your previous session.", "info");
+        },
+      });
+      if (result.cancelled) {
+        ctx.ui.notify("Switch back cancelled.", "info");
+        return;
+      }
+      clearAgentMode();
     },
   });
 }
