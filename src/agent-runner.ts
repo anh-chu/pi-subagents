@@ -115,24 +115,39 @@ export function parseExtensionsSpec(
 }
 
 /**
- * Parse raw `ext:` selector strings (from the `tools:` CSV) into the set of
- * extension names to keep loaded and a per-extension tool-narrowing map.
+ * Parse raw `ext:` selector strings (from the `tools:` CSV) into extension name refs,
+ * per-extension tool narrowing, and a wildcard flag for `ext:*`.
  *
- * `ext:foo` → `extNames` has `foo`, no narrowing entry (all of foo's tools).
- * `ext:foo/bar` → `extNames` has `foo`, `narrowing.foo` has `bar` (only `bar`).
- * A name lands in `narrowing` only when a `/tool` form is seen, so a bare
- * `ext:foo` alongside `ext:foo/bar` leaves narrowing in effect (narrowing wins).
- * The split is on the first `/`; extension canonical names never contain `/`.
+ * `ext:*` (literal wildcard) → `hasWildcard = true`, no extName/narrowing entry.
+ * This allows all extension tools from loaded extensions. `ext:*` supersedes any
+ * specific named extensions (e.g., `ext:foo` becomes redundant).
+ *
+ * `ext:foo` → `extNames` has `foo`, no narrowing entry — foo's tools stay at
+ * their default (all of them; this form is a no-op on its own).
+ *
+ * `ext:foo/bar` → `narrowing.foo` has `bar`, so foo is narrowed to only
+ * `bar` while every other extension is unaffected. A name lands in `narrowing`
+ * only when a `/tool` form is seen; a bare `ext:foo` alongside `ext:foo/bar`
+ * leaves narrowing in effect (narrowing wins). The split is on the first `/`;
+ * extension canonical names never contain `/`.
  */
 export function parseExtSelectors(entries: string[]): {
   extNames: Set<string>;
   narrowing: Map<string, Set<string>>;
+  hasWildcard: boolean;
 } {
   const extNames = new Set<string>();
   const narrowing = new Map<string, Set<string>>();
+  let hasWildcard = false;
+
   for (const raw of entries) {
     if (!raw) continue;
-    const body = raw.slice("ext:".length);
+    const body = raw.slice("ext:".length).trim();
+    // Check for `ext:*` wildcard (literal asterisk, case-insensitive "-", matches all)
+    if (body === "*" || body.toLowerCase() === "all") {
+      hasWildcard = true;
+      continue;
+    }
     const slash = body.indexOf("/");
     // Extension name matches case-insensitively (matches the loader-side canonical
     // name). Tool names are case-preserved — they're matched against pi-mono's
@@ -150,7 +165,7 @@ export function parseExtSelectors(entries: string[]): {
     }
     set.add(tool);
   }
-  return { extNames, narrowing };
+  return { extNames, narrowing, hasWildcard };
 }
 
 /** Default max turns. undefined = unlimited (no turn limit). */
@@ -442,9 +457,15 @@ export async function runAgent(
   // the LLM. They do NOT control loading — `extensions:` is the sole authority for
   // which extensions load. `ext:foo` against an extension that `extensions:` excluded
   // is an orphan and warns after reload. `isolated` means no extension tools at all.
-  const { extNames, narrowing } = parseExtSelectors(
-    options.isolated ? [] : (agentConfig?.extSelectors ?? []),
-  );
+  //
+  // True-whitelist semantics:
+  //   - agentConfig?.extSelectors is undefined → legacy mode: allow all extension tools
+  //   - agentConfig?.extSelectors is [] → explicit field with no ext: entries: deny all extension tools
+  //   - agentConfig?.extSelectors has entries → whitelist those extension tools
+  //   - "ext:*" wildcard allows all extension tools
+  const extSelectorsField = options.isolated ? [] : agentConfig?.extSelectors;
+  const isExtSelectorsExplicit = options.isolated || agentConfig?.extSelectors !== undefined;
+  const { extNames, narrowing, hasWildcard } = parseExtSelectors(extSelectorsField ?? []);
   const noExtensions = extensions === false;
 
   const extensionsSpec = Array.isArray(extensions)
@@ -610,19 +631,33 @@ export async function runAgent(
   // Extensions populate `extension.tools` during `loader.reload()` and the set
   // is stable afterwards — `bindExtensions` does not register new tools.
   //
-  // Opt-in flip: when any `ext:` selector is present, extension tools become an
-  // explicit allowlist — a loaded extension not named by a selector contributes
-  // no tools (its handlers still ran), and `ext:foo/bar` narrows `foo` to `bar`.
+  // True-whitelist semantics for `tools:` field and `ext:` selectors:
+  //   - extSelectors undefined (field omitted) → legacy: include all extension tools
+  //   - extSelectors [] (explicit field, zero ext: entries) → deny all extension tools
+  //   - extSelectors has "ext:*" → include all extension tools
+  //   - extSelectors has specific ext: entries → whitelist only those extensions
+  //
+  // Per-extension narrowing: `ext:foo/bar` restricts `foo` to just `bar`.
+  // It does NOT affect other loaded extensions — naming one extension's tools
+  // never implicitly denies the rest. A bare `ext:foo` (no `/tool` suffix)
+  // is a no-op on its own (just marks the extension as referenced for orphan warnings).
   const extensionToolNames: string[] = [];
   if (!noExtensions) {
-    const optInActive = extNames.size > 0;
-    for (const extension of loader.getExtensions().extensions) {
-      const canon = extensionCanonicalName(extension.path);
-      if (optInActive && !extNames.has(canon)) continue;
-      const narrowed = narrowing.get(canon);
-      for (const toolName of extension.tools.keys()) {
-        if (narrowed && !narrowed.has(toolName)) continue;
-        extensionToolNames.push(toolName);
+    const denyAllExtensionTools = isExtSelectorsExplicit && !hasWildcard && extNames.size === 0 && narrowing.size === 0;
+    if (!denyAllExtensionTools) {
+      // Legacy mode (extSelectors undefined) or wildcard mode (ext:*) or specific entries: include extension tools
+      for (const extension of loader.getExtensions().extensions) {
+        const canon = extensionCanonicalName(extension.path);
+        // Whitelist check: if extSelectors is explicit and not a wildcard, only include
+        // extension tools from named extensions OR those with narrowing entries.
+        if (isExtSelectorsExplicit && !hasWildcard && !extNames.has(canon) && !narrowing.has(canon)) {
+          continue; // Explicit whitelist: skip extensions not named in ext: selectors
+        }
+        const narrowed = narrowing.get(canon);
+        for (const toolName of extension.tools.keys()) {
+          if (narrowed && !narrowed.has(toolName)) continue;
+          extensionToolNames.push(toolName);
+        }
       }
     }
   }
@@ -644,7 +679,8 @@ export async function runAgent(
     if (builtinToolNameSet.has(t)) return true;
     // Reached only for extension tools. The extension set was already filtered
     // at the loader (extensionsOverride / noExtensions) and at enumeration
-    // (`ext:` opt-in flip), so any extension tool in `extensionToolNames` is allowed.
+    // (per-extension `ext:` narrowing), so any extension tool in `extensionToolNames`
+    // is allowed.
     return !noExtensions;
   });
 

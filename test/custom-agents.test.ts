@@ -194,7 +194,8 @@ Wildcard plus ext.`);
       writeAgent(name, `---\ntools: ${value}\n---\n\nAlias.`);
       const agent = loadCustomAgents(tmpDir).get(name)!;
       expect(agent.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
-      expect(agent.extSelectors).toBeUndefined();
+      // Explicit field with no ext: entries → deny extension tools (true-whitelist semantics)
+      expect(agent.extSelectors).toEqual([]);
     }
   });
 

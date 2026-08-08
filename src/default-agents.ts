@@ -21,6 +21,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       // Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
       extensions: true,
       skills: true,
+      extSelectors: ["ext:*"],
       systemPrompt: "",
       promptMode: "append",
       isDefault: true,
@@ -35,6 +36,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       builtinToolNames: READ_ONLY_TOOLS,
       extensions: true,
       skills: true,
+      extSelectors: ["ext:*"],
       model: "anthropic/claude-haiku-4-5-20251001",
       lockModel: true,
       systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
@@ -81,6 +83,7 @@ If the task asks you to inventory, audit, or cross-check an entire codebase or f
       builtinToolNames: READ_ONLY_TOOLS,
       extensions: true,
       skills: true,
+      extSelectors: ["ext:*"],
       lockModel: true,
       systemPrompt: `# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
 You are a software architect and planning specialist.
@@ -145,6 +148,7 @@ Only skip this block when the work is genuinely one coupled change: edits depend
       // model omitted — inherit parent model.
       extensions: true,
       skills: false,
+      extSelectors: ["ext:*"],
       thinking: "medium",
       inheritContext: true,
       memory: "local",
@@ -207,6 +211,7 @@ Recommended next step: N.
       // model omitted — inherit parent model.
       extensions: true,
       skills: false,
+      extSelectors: ["ext:*"],
       thinking: "medium",
       memory: "local",
       maxTurns: 30,
@@ -318,6 +323,7 @@ When reviewing code, cite file paths and line numbers. When reviewing plans, cit
       // model omitted — inherit parent model.
       extensions: true,
       skills: false,
+      extSelectors: ["ext:*"],
       thinking: "medium",
       inheritContext: true,
       maxTurns: 30,

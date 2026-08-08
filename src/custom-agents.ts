@@ -118,20 +118,34 @@ function csvList(val: unknown, defaults: string[]): string[] {
 
 /**
  * Partition the `tools:` CSV into the built-in tool allowlist and raw `ext:` selectors.
- * `*` (and the case-insensitive alias `all`, for `tools: all`) expands to all
- * built-ins; plain entries are built-in names; `ext:` entries are extension-tool
- * selectors parsed later by the runner. omitted → all built-ins, no selectors.
- * `tools:` present with only `ext:` entries → zero built-ins (use `*`).
+ * True-whitelist semantics:
+ *   - omitted → all built-ins + all extension tools (legacy mode, extSelectors = undefined)
+ *   - explicit field, zero ext: entries → all specified built-ins, ZERO extension tools (extSelectors = [])
+ *   - explicit field with ext: entries → specified built-ins + only whitelisted extensions (extSelectors = [...entries])
+ *   - ext:* (literal wildcard) → all extension tools from loaded extensions
+ * `*` (and case-insensitive `all`) expands to all built-in tool names.
+ * Plain entries are built-in names; `ext:` entries are extension-tool selectors parsed later.
  */
 function parseToolsField(val: unknown): { builtinToolNames: string[]; extSelectors: string[] | undefined } {
-  const entries = csvList(val, BUILTIN_TOOL_NAMES);
+  // Field omitted entirely → legacy mode: all built-ins, allow all extension tools (extSelectors undefined)
+  if (val === undefined || val === null) {
+    return {
+      builtinToolNames: BUILTIN_TOOL_NAMES,
+      extSelectors: undefined,
+    };
+  }
+
+  // Field is explicitly provided (even if empty/whitespace after parsing)
+  const entries = parseCsvField(val) ?? [];
   const isWildcard = (e: string) => e === "*" || e.toLowerCase() === "all";
   const hasWildcard = entries.some(isWildcard);
   const plain = entries.filter(e => !isWildcard(e) && !e.startsWith("ext:"));
   const extEntries = entries.filter(e => e.startsWith("ext:"));
   return {
     builtinToolNames: hasWildcard ? [...new Set([...BUILTIN_TOOL_NAMES, ...plain])] : plain,
-    extSelectors: extEntries.length > 0 ? extEntries : undefined,
+    // Explicit field with zero ext: entries → return [] (deny-by-default for extension tools)
+    // Explicit field with ext: entries → return those entries
+    extSelectors: extEntries.length > 0 ? extEntries : [],
   };
 }
 
