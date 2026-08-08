@@ -144,6 +144,18 @@ export async function enterAgentMode(
   const displayName = config.displayName ?? config.name;
   const systemPrompt = await buildAgentModePrompt(pi, config, ctx.cwd);
 
+  // Resolve model and tools BEFORE calling ctx.newSession(). The setup()
+  // callback below runs after the old session has already been torn down
+  // (teardownCurrent), which invalidates the pre-replacement `pi` / `ctx`
+  // handles. Calling anything session-bound on them from inside setup()
+  // throws synchronously, which the host treats as a fatal runtime error
+  // and immediately process.exit()s the whole TUI. Precompute here instead
+  // and just close over the plain results inside setup().
+  const modelOrError = config.model
+    ? resolveAgentModeModel(config, undefined, ctx.modelRegistry as any)
+    : undefined;
+  const tools = await resolveAgentModeTools(pi, config, pi);
+
   const result = await ctx.newSession({
     parentSession: ctx.sessionManager.getSessionFile(),
     setup: async (sessionManager) => {
@@ -152,17 +164,13 @@ export async function enterAgentMode(
       // setup() instead of withSession() avoids stale-extension-handle issues:
       // setup receives the new SessionManager directly, before the old api
       // context is invalidated.
-      if (config.model) {
-        const modelOrError = resolveAgentModeModel(config, undefined, ctx.modelRegistry as any);
-        if (typeof modelOrError !== "string" && modelOrError) {
-          sessionManager.appendModelChange(modelOrError.provider, modelOrError.id);
-        }
+      if (typeof modelOrError !== "string" && modelOrError) {
+        sessionManager.appendModelChange(modelOrError.provider, modelOrError.id);
       }
       if (config.thinking) {
         // Stored as a session-level flag we can read via session_info/custom entry.
         sessionManager.appendCustomEntry("agent-mode-thinking", { level: config.thinking });
       }
-      const tools = await resolveAgentModeTools(pi, config, pi);
       sessionManager.appendCustomEntry("agent-mode-tools", { tools });
       sessionManager.appendCustomEntry("agent-mode-config", {
         agentName: config.name,
