@@ -62,15 +62,15 @@ describe("GrindCounter", () => {
     expect(nudge?.inlineStreak).toBe(25);
   });
 
-  it("nudges at 8 consecutive bash calls with the targeted message", () => {
+  it("nudges at 12 consecutive bash calls with the targeted message", () => {
     const counter = new GrindCounter();
-    for (let i = 1; i <= 7; i++) {
+    for (let i = 1; i <= 11; i++) {
       expect(observe(counter, i, "bash")).toBeUndefined();
     }
-    const nudge = observe(counter, 8, "bash");
+    const nudge = observe(counter, 12, "bash");
     expect(nudge?.kind).toBe("bash");
-    expect(nudge?.bashStreak).toBe(8);
-    expect(nudge?.message).toContain("8 consecutive bash calls");
+    expect(nudge?.bashStreak).toBe(12);
+    expect(nudge?.message).toContain("12 consecutive bash calls");
     expect(nudge?.message).toContain("reproduction");
   });
 
