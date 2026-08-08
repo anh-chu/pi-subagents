@@ -269,7 +269,7 @@ All fields are optional — sensible defaults for everything.
 | `max_turns`         | unlimited      | Max agentic turns before graceful shutdown. `0` or omit for unlimited. Surfaced in the Agent tool type list so callers can budget turns                                                                           |
 | `prompt_mode`       | `replace`      | `replace`: body is the full system prompt (no AGENTS.md / CLAUDE.md inheritance). `append`: body appended to parent's prompt (agent acts as a "parent twin" — inherits parent's AGENTS.md / CLAUDE.md)                                                   |
 | `inherit_context`   | `false`        | Fork parent conversation into agent. Surfaced in the Agent tool type list so callers know their conversation is forked                                                                                            |
-| `run_in_background` | `false`        | Run in background by default                                                                                                                                                                                                                             |
+| `run_in_background` | `true`         | Run in background by default                                                                                                                                                                                                                              |
 | `isolated`          | `false`        | No extension/MCP tools, only built-in                                                                                                                                                                                                                    |
 | `enabled`           | `true`         | Set to `false` to disable the agent definition. Disabled agents stay visible and manageable via `/agents`, but new launches via the `Agent` tool, RPC, nested subagents, scheduled jobs, or agent-mode commands are rejected with a clear disabled message. Changing this does not stop already-running agents. A stored schedule whose target is disabled fails when it fires and can run again after the target is re-enabled; the schedule record itself is not deleted or auto-disabled. |
 
@@ -289,7 +289,7 @@ Launch a sub-agent.
 | `model`             | string       | no       | Model — `provider/modelId` or fuzzy name (`"haiku"`, `"sonnet"`) |
 | `thinking`          | string       | no       | Thinking level: off, minimal, low, medium, high, xhigh           |
 | `max_turns`         | number       | no       | Max agentic turns. Omit for unlimited (default)                  |
-| `run_in_background` | boolean      | no       | Run without blocking                                             |
+| `run_in_background` | boolean      | no       | Run without blocking. Default: true (set false to block)         |
 | `resume`            | string       | no       | Agent ID to resume a previous session                            |
 | `isolated`          | boolean      | no       | No extension/MCP tools                                           |
 | `isolation`         | `"worktree"` | no       | Run in an isolated git worktree                                  |
