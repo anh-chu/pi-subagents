@@ -14,7 +14,26 @@ import { detectEnv } from "./env.js";
 import { resolveModel } from "./model-resolver.js";
 import { buildAgentPrompt } from "./prompts.js";
 import { preloadSkills } from "./skill-loader.js";
-import type { AgentConfig } from "./types.js";
+import type { AgentConfig, ThinkingLevel } from "./types.js";
+
+/**
+ * Model/tools/thinking to apply once the replacement session's OWN extension
+ * instance receives "session_start". Session replacement creates a brand-new
+ * extension instance with its own `pi` handle; the old `pi`/`ctx` captured
+ * in enterAgentMode() is invalidated as soon as the old session tears down
+ * (see enterAgentMode for details), so live calls like pi.setModel() cannot
+ * be made from there for the new session. This module-level variable is the
+ * one thing that safely crosses the instance boundary: the extension module
+ * itself is not re-imported on session replacement, only its default export
+ * factory function is invoked again (registering a fresh session_start
+ * handler below that reads and clears this).
+ */
+interface PendingAgentModeApply {
+  model?: Model<any>;
+  tools?: string[];
+  thinking?: ThinkingLevel;
+}
+let pendingApply: PendingAgentModeApply | undefined;
 
 export interface AgentModeState {
   /** Name of the agent the user selected, or undefined for no active override. */
@@ -154,24 +173,27 @@ export async function enterAgentMode(
   const modelOrError = config.model
     ? resolveAgentModeModel(config, undefined, ctx.modelRegistry as any)
     : undefined;
+  const resolvedModel = typeof modelOrError !== "string" && modelOrError ? modelOrError : undefined;
   const tools = await resolveAgentModeTools(pi, config, pi);
+
+  // setup(sessionManager) can only persist session-log entries — it cannot
+  // actually switch the live model/tools/thinking, because by the time it
+  // runs the new session's AgentSession (and its default model) already
+  // exists. pi.setModel()/setActiveTools()/setThinkingLevel() are the live
+  // APIs, but they only exist on the per-instance `pi`, and the replacement
+  // session gets a brand-new extension instance with its own `pi` — this
+  // old one is invalidated. So we stash what to apply here and let the new
+  // instance's own "session_start" handler (registered in
+  // registerAgentModeCommands) apply it via its own valid `pi`.
+  pendingApply = { model: resolvedModel, tools, thinking: config.thinking };
 
   const result = await ctx.newSession({
     parentSession: ctx.sessionManager.getSessionFile(),
     setup: async (sessionManager) => {
-      // Apply model, thinking, tools, and a persistent config marker to the
-      // fresh session BEFORE the runtime starts accepting user input. Using
-      // setup() instead of withSession() avoids stale-extension-handle issues:
-      // setup receives the new SessionManager directly, before the old api
-      // context is invalidated.
-      if (typeof modelOrError !== "string" && modelOrError) {
-        sessionManager.appendModelChange(modelOrError.provider, modelOrError.id);
-      }
-      if (config.thinking) {
-        // Stored as a session-level flag we can read via session_info/custom entry.
-        sessionManager.appendCustomEntry("agent-mode-thinking", { level: config.thinking });
-      }
-      sessionManager.appendCustomEntry("agent-mode-tools", { tools });
+      // Persist a config marker for introspection. Model/thinking/tool
+      // entries themselves are written by pi.setModel()/setThinkingLevel()
+      // when the "session_start" handler applies pendingApply, so they
+      // aren't duplicated here.
       sessionManager.appendCustomEntry("agent-mode-config", {
         agentName: config.name,
         displayName,
@@ -195,6 +217,7 @@ export async function enterAgentMode(
   });
 
   if (result.cancelled) {
+    pendingApply = undefined;
     ctx.ui.notify("Agent-mode switch cancelled.", "info");
     return;
   }
@@ -211,6 +234,31 @@ export interface AgentModeEntryData {
 
 /** Register /agent-mode and /agent-mode-off commands. */
 export function registerAgentModeCommands(pi: ExtensionAPI): void {
+  // Applies a pending model/tools/thinking switch queued by enterAgentMode()
+  // just before it called ctx.newSession(). Runs once per fresh instance,
+  // using this instance's own (valid) pi, then clears the flag.
+  pi.on("session_start", async () => {
+    if (!pendingApply) return;
+    const { model, tools, thinking } = pendingApply;
+    pendingApply = undefined;
+    if (model) {
+      try {
+        const ok = await pi.setModel(model);
+        if (!ok) {
+          pi.appendEntry("agent-mode-warning", { message: `No API key for ${model.provider}/${model.id}` });
+        }
+      } catch {
+        // Ignore — leave the session on whatever default model it started with.
+      }
+    }
+    if (thinking) {
+      pi.setThinkingLevel(thinking);
+    }
+    if (tools) {
+      pi.setActiveTools(tools);
+    }
+  });
+
   pi.registerCommand("agent-mode", {
     description: "Switch to a fresh session configured as a subagent",
     handler: async (args, ctx) => {
