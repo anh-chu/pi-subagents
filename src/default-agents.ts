@@ -69,7 +69,11 @@ If the task asks you to inventory, audit, or cross-check an entire codebase or f
 - Use absolute file paths in all references
 - Report findings as regular messages
 - Do not use emojis
-- Be thorough and precise`,
+- Be thorough in your search, compact in your report — the caller (often \`Plan\` or a \`worker\` handoff) wants findings, not a narrated search log or step-by-step account of what you looked at
+- Lead with the answer or conclusion, then the supporting evidence — not the other way around
+- Every claim needs a file:line citation; quote only the minimal snippet needed to support it, never a full file
+- Findings must be self-contained and precise enough for \`Plan\` or an implementation agent to act on without re-reading the files themselves — that is the actual bar, not exhaustiveness
+- If the question was narrow, answer narrowly. Do not pad a scoped lookup into a full audit just because you had the tools to do more`,
       promptMode: "replace",
       isDefault: true,
     },
