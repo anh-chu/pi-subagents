@@ -5,6 +5,7 @@ import {
   clearAgentMode,
   enterAgentMode,
   getAgentMode,
+  registerAgentModeCommands,
   resolveAgentModeModel,
   resolveAgentModeTools,
   setAgentMode,
@@ -183,7 +184,11 @@ describe("enterAgentMode", () => {
         find: vi.fn((provider: string, modelId: string) => ({ id: modelId, provider })),
         getAvailable: vi.fn(() => [{ id: "sonnet", provider: "anthropic", name: "Sonnet" }]),
       },
-      sessionManager: { getSessionFile: vi.fn(() => "/session/parent") },
+      sessionManager: {
+        getSessionFile: vi.fn(() => "/session/parent"),
+        getSessionId: vi.fn(() => "parent-session-id"),
+        getEntries: vi.fn(() => []),
+      },
       newSession: vi.fn(async ({ setup, withSession }: { setup?: (sm: any) => Promise<void>; withSession: (replacementCtx: any) => Promise<void> }) => {
         const fakeSm = {
           appendModelChange: vi.fn((provider: string, modelId: string) => setupCalls.push({ type: "model_change", data: { provider, modelId } })),
@@ -211,6 +216,7 @@ describe("enterAgentMode", () => {
       ui: {
         setEditorText: vi.fn(),
         notify: vi.fn(),
+        setWidget: vi.fn(),
       },
       sendMessage: vi.fn(async (msg: any, _opts: any) => {
         sentMessages.push(msg);
@@ -229,6 +235,7 @@ describe("enterAgentMode", () => {
       setThinkingLevel: vi.fn(),
       setActiveTools: vi.fn(),
       appendEntry: vi.fn(),
+      registerCommand: vi.fn(),
       getAllTools: vi.fn(() => [
         { name: "read" },
         { name: "bash" },
@@ -283,7 +290,7 @@ describe("enterAgentMode", () => {
     const confirmCall = (ctx.ui.confirm as any).mock.calls[0] as string[];
     const message = confirmCall.join(" ");
     expect(message).toContain("brand-new session");
-    expect(message).toContain("NOT be carried over");
+    expect(message).toContain("Nothing carries over automatically");
   });
 
   it("success path configures replacement session", async () => {
@@ -293,12 +300,16 @@ describe("enterAgentMode", () => {
     registerAgents(userAgents);
 
     const pi = fakePi();
+    const sessionStartHandlers: Array<(event: any, ctx: any) => Promise<void> | void> = [];
+    (pi as any).on = vi.fn((event: string, handler: (event: any, ctx: any) => Promise<void> | void) => {
+      if (event === "session_start") sessionStartHandlers.push(handler);
+    });
+
     const setupCalls: any[] = [];
     const ctx = fakeCtx({
       newSession: vi.fn(async ({ setup, withSession }: { setup: (sm: any) => Promise<void>; withSession: (replacementCtx: any) => Promise<void> }) => {
         if (setup) {
           const fakeSm = {
-            appendModelChange: vi.fn((provider: string, modelId: string) => setupCalls.push({ type: "model_change", data: { provider, modelId } })),
             appendCustomEntry: vi.fn((type: string, data: any) => setupCalls.push({ type, data })),
             appendCustomMessageEntry: vi.fn((type: string, content: any, display: boolean) => setupCalls.push({ type, content, display })),
           };
@@ -311,27 +322,34 @@ describe("enterAgentMode", () => {
     });
     await enterAgentMode(pi, ctx, "test-agent");
 
-    const modelCalls = setupCalls.filter(c => c.type === "model_change");
-    expect(modelCalls.length).toBe(1);
-    expect(modelCalls[0].data).toEqual({ provider: "anthropic", modelId: "sonnet" });
-
-    const thinkingCalls = setupCalls.filter(c => c.type === "agent-mode-thinking");
-    expect(thinkingCalls.length).toBe(1);
-    expect(thinkingCalls[0].data).toEqual({ level: "low" });
-
-    const toolCalls = setupCalls.filter(c => c.type === "agent-mode-tools");
-    expect(toolCalls.length).toBe(1);
-    expect(toolCalls[0].data.tools.sort()).toEqual(["bash", "read"]);
-
+    // setup() only persists session-log entries; model/tools/thinking are
+    // applied later by the new instance's own session_start handler.
     const configCalls = setupCalls.filter(c => c.type === "agent-mode-config");
     expect(configCalls.length).toBe(1);
     expect(configCalls[0].data).toMatchObject({ agentName: "test-agent" });
+    expect(configCalls[0].data.tools.sort()).toEqual(["bash", "read"]);
 
     const instructionCalls = setupCalls.filter(c => c.type === "agent-mode-instructions");
     expect(instructionCalls.length).toBe(1);
     expect(instructionCalls[0].content).toEqual([{ type: "text", text: expect.stringContaining("You are a test agent") }]);
     expect(instructionCalls[0].display).toBe(false);
 
-    expect(getAgentMode()).toEqual({ activeAgent: "test-agent", displayName: "test-agent" });
+    // Simulate the fresh instance registering commands and firing session_start,
+    // which is what applies the pending model/tools/thinking switch.
+    registerAgentModeCommands(pi);
+    const fakeNewCtx = { ui: { addAutocompleteProvider: vi.fn() } };
+    for (const handler of sessionStartHandlers) {
+      await handler({}, fakeNewCtx);
+    }
+
+    expect(pi.setModel).toHaveBeenCalledWith({ id: "sonnet", provider: "anthropic" });
+    expect(pi.setThinkingLevel).toHaveBeenCalledWith("low");
+    expect(pi.setActiveTools).toHaveBeenCalledWith(expect.arrayContaining(["bash", "read"]));
+
+    expect(getAgentMode()).toEqual({
+      activeAgent: "test-agent",
+      displayName: "test-agent",
+      parentSessionFile: "/session/parent",
+    });
   });
 });
