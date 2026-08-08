@@ -16,12 +16,14 @@ import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type Exten
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { differsFromDefault, diffFromDefault } from "./agent-diff.js";
+import { revertFieldToDefault } from "./agent-field-revert.js";
 import { AgentManager } from "./agent-manager.js";
 import { registerAgentModeCommands } from "./agent-mode.js";
 import { agentDepth, getAgentConversation, getDefaultExtensions, getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, setDefaultExtensions, setDefaultMaxTurns, setGraceTurns, steerAgent } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentAvailability, getAgentConfig, getAllTypes, getAvailableTypes, getDefaultAgentNames, getUserAgentNames, isDefaultsDisabled, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
+import { DEFAULT_AGENTS } from "./default-agents.js";
 import { deleteGlobalActivity, setGlobalActivity } from "./global-registry.js";
 import { formatGrindStatus, GrindCounter } from "./grind-counter.js";
 import { GroupJoinManager } from "./group-join.js";
@@ -1899,9 +1901,10 @@ Notes:
       menuOptions = ["Edit", "Disable", "Delete", "Back"];
     }
 
-    // Offer diff view for replace-mode overrides that diverge from the bundled default
+    // Offer diff view + selective revert for replace-mode overrides that diverge from the bundled default
     if (hasDiff) {
       menuOptions.splice(menuOptions.indexOf("Back"), 0, "View diff vs default");
+      menuOptions.splice(menuOptions.indexOf("Back"), 0, "Revert field to default…");
     }
     // Always offer a direct background spawn (no orchestrator prompt needed).
     menuOptions.splice(menuOptions.indexOf("Back"), 0, "Spawn (background)");
@@ -1945,17 +1948,81 @@ Notes:
       if (!entries || entries.length === 0) {
         ctx.ui.notify("No differences found.", "info");
       } else {
-        const lines = [`${name} — differences from bundled default:\n`];
+        const lines = [
+          `${name} — differences from bundled default`,
+          "(read-only — this view is for inspection; edits made here are discarded)\n",
+        ];
         const maxField = Math.max(...entries.map(e => e.field.length));
         for (const e of entries) {
-          lines.push(`${e.field.padEnd(maxField)}  override: ${e.local}`);
-          if (e.default) lines.push(`${''.padEnd(maxField)}  default:   ${e.default}`);
+          if (e.field === "System prompt") {
+            lines.push(`${e.field}:`);
+            lines.push(e.local); // pre-formatted multi-line diff block
+            lines.push("");
+          } else {
+            lines.push(`${e.field.padEnd(maxField)}  override: ${e.local}`);
+            if (e.default) lines.push(`${''.padEnd(maxField)}  default:   ${e.default}`);
+          }
         }
         // Show via editor for scrollable read-only display; discard any result
-        await ctx.ui.editor(`${name} diff`, lines.join("\n"));
+        await ctx.ui.editor(`${name} diff (read-only)`, lines.join("\n"));
       }
+    } else if (choice === "Revert field to default…") {
+      await revertFieldFlow(ctx, name);
     } else if (choice === "Spawn (background)") {
       await spawnBackgroundFromMenu(ctx, name, cfg);
+    }
+  }
+
+  /**
+   * Repeatedly let the user pick one differing field and revert just that
+   * field in the override .md file to the bundled default's value, leaving
+   * every other override in the file untouched. Loops until the user picks
+   * "Done" or no differences remain.
+   */
+  async function revertFieldFlow(ctx: ExtensionCommandContext, name: string) {
+    for (;;) {
+      const cfg = getAgentConfig(name);
+      if (!cfg) return;
+      const file = findAgentFile(name);
+      if (!file) {
+        ctx.ui.notify(`No override file found for "${name}".`, "warning");
+        return;
+      }
+      const def = DEFAULT_AGENTS.get(name);
+      if (!def) {
+        ctx.ui.notify(`No bundled default for "${name}".`, "warning");
+        return;
+      }
+      const entries = diffFromDefault(cfg);
+      if (!entries || entries.length === 0) {
+        ctx.ui.notify("No differences remain.", "info");
+        return;
+      }
+
+      const options = [...entries.map(e => e.field), "Done"];
+      const choice = await ctx.ui.select(`${name} — revert field to default`, options);
+      if (!choice || choice === "Done") return;
+
+      const entry = entries.find(e => e.field === choice);
+      if (!entry) continue;
+
+      const confirmed = await ctx.ui.confirm(
+        "Revert field",
+        `Revert "${entry.field}" in ${name} to the bundled default? Other overrides in this file are left untouched.`,
+      );
+      if (!confirmed) continue;
+
+      const content = readFileSync(file.path, "utf-8");
+      const updated = revertFieldToDefault(content, entry.key, def);
+      if (updated === content) {
+        ctx.ui.notify(`Could not revert "${entry.field}" automatically — edit the file directly.`, "warning");
+        continue;
+      }
+
+      const { writeFileSync } = await import("node:fs");
+      writeFileSync(file.path, updated, "utf-8");
+      reloadCustomAgents();
+      ctx.ui.notify(`Reverted "${entry.field}" to default in ${file.path}`, "info");
     }
   }
 

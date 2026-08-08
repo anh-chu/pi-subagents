@@ -202,21 +202,21 @@ describe("diffFromDefault", () => {
   it("returns entries for changed description", () => {
     const r = diffFromDefault(override("Plan", { description: "Changed" }));
     expect(field(r, "Description")).toEqual({
-      field: "Description", local: "Changed", default: expect.any(String),
+      key: "description", field: "Description", local: "Changed", default: expect.any(String),
     });
   });
 
   it("returns entries for changed model", () => {
     const r = diffFromDefault(override("Plan", { model: "anthropic/claude-sonnet-4-6" }));
     expect(field(r, "Model")).toEqual({
-      field: "Model", local: "anthropic/claude-sonnet-4-6", default: expect.any(String),
+      key: "model", field: "Model", local: "anthropic/claude-sonnet-4-6", default: expect.any(String),
     });
   });
 
   it("returns entries for changed thinking", () => {
     const r = diffFromDefault(override("Plan", { thinking: "high" }));
     expect(field(r, "Thinking")).toEqual({
-      field: "Thinking", local: "high", default: expect.any(String),
+      key: "thinking", field: "Thinking", local: "high", default: expect.any(String),
     });
   });
 
@@ -259,15 +259,14 @@ describe("diffFromDefault", () => {
 
   // ---- systemPrompt diff format ----
 
-  it("reports system prompt diff as line+char counts, never the full body", () => {
+  it("reports system prompt diff with the actual differing lines, capped", () => {
     const r = diffFromDefault(override("Plan", { systemPrompt: "Line 1\nLine 2 changed\nLine 3" }));
     const e = field(r, "System prompt");
     expect(e).toBeDefined();
-    expect(e!.local).toMatch(/^first difference at line \d+ \(local: \d+ chars, default: \d+ chars\)$/);
-    // Must not contain the actual prompt body
-    expect(e!.local).not.toContain("Line 2 changed");
-    expect(e!.local).not.toContain("Software architect");
-    // default field is empty for prompt diffs
+    expect(e!.local).toMatch(/^@@ from line \d+ \(local: \d+ chars, default: \d+ chars\)/);
+    // Should show the actual changed line so the user can see what changed
+    expect(e!.local).toContain("Line 2 changed");
+    // default field is empty — the diff block is embedded in local
     expect(e!.default).toBe("");
   });
 
@@ -275,7 +274,16 @@ describe("diffFromDefault", () => {
     const r = diffFromDefault(override("Plan", { systemPrompt: "Completely different prompt" }));
     const e = field(r, "System prompt");
     expect(e).toBeDefined();
-    expect(e!.local).toContain("first difference at line 1");
+    expect(e!.local).toContain("@@ from line 1");
+    expect(e!.local).toContain("Completely different prompt");
+  });
+
+  it("caps very large prompt diffs instead of dumping everything", () => {
+    const manyLines = Array.from({ length: 50 }, (_, i) => `local line ${i}`).join("\n");
+    const r = diffFromDefault(override("Plan", { systemPrompt: manyLines }));
+    const e = field(r, "System prompt");
+    expect(e).toBeDefined();
+    expect(e!.local).toContain("more added line(s)");
   });
 
   // ---- multi-field diff ----

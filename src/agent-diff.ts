@@ -10,6 +10,8 @@ import type { AgentConfig } from "./types.js";
 
 /** A single field-level difference between a local override and its bundled default. */
 export interface DiffEntry {
+  /** Internal NormalizedConfig key (e.g. "systemPrompt") — used by agent-field-revert.ts. */
+  key: keyof NormalizedConfig;
   field: string;
   local: string;
   default: string;
@@ -89,19 +91,36 @@ const FIELD_LABELS: Record<keyof NormalizedConfig, string> = {
 };
 
 /**
- * Format the systemPrompt diff: first differing line and character counts.
- * Never dumps the full prompt body.
+ * Format the systemPrompt diff: the actual differing lines (common prefix
+ * and suffix trimmed away), capped so huge prompts don't flood the view.
+ * Never dumps the full prompt body — only the part that actually changed.
  */
 function fmtPromptDiff(local: string, def: string): string {
-  const localLines = local.split("\n");
-  const defLines = def.split("\n");
-  const maxIdx = Math.min(localLines.length, defLines.length);
-  let line = 1;
-  for (; line <= maxIdx; line++) {
-    if (localLines[line - 1] !== defLines[line - 1]) break;
+  const a = local.split("\n");
+  const b = def.split("\n");
+
+  let start = 0;
+  const maxStart = Math.min(a.length, b.length);
+  while (start < maxStart && a[start] === b[start]) start++;
+
+  let endA = a.length - 1;
+  let endB = b.length - 1;
+  while (endA >= start && endB >= start && a[endA] === b[endB]) {
+    endA--;
+    endB--;
   }
-  if (line > maxIdx) line = Math.min(localLines.length, defLines.length) + 1;
-  return `first difference at line ${line} (local: ${local.length} chars, default: ${def.length} chars)`;
+
+  const removed = b.slice(start, endB + 1); // default-only lines
+  const added = a.slice(start, endA + 1); // override-only lines
+  const MAX = 8;
+
+  const out: string[] = [`@@ from line ${start + 1} (local: ${local.length} chars, default: ${def.length} chars)`];
+  for (const l of removed.slice(0, MAX)) out.push(`  - ${l}`);
+  if (removed.length > MAX) out.push(`  ... (${removed.length - MAX} more removed line(s))`);
+  for (const l of added.slice(0, MAX)) out.push(`  + ${l}`);
+  if (added.length > MAX) out.push(`  ... (${added.length - MAX} more added line(s))`);
+
+  return out.join("\n");
 }
 
 /** Format a scalar field value for display — omit "undefined". */
@@ -136,9 +155,9 @@ export function diffFromDefault(cfg: AgentConfig): DiffEntry[] | null {
     const bv = b[field];
     if (av === bv) return;
     if (field === "systemPrompt") {
-      entries.push({ field: FIELD_LABELS[field], local: fmtPromptDiff(av as string, bv as string), default: "" });
+      entries.push({ key: field, field: FIELD_LABELS[field], local: fmtPromptDiff(av as string, bv as string), default: "" });
     } else {
-      entries.push({ field: FIELD_LABELS[field], local: fmtVal(av), default: fmtVal(bv) });
+      entries.push({ key: field, field: FIELD_LABELS[field], local: fmtVal(av), default: fmtVal(bv) });
     }
   };
 
