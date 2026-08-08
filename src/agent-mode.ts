@@ -345,6 +345,8 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
         return { items, prefix: `@@${match[1]}` };
       },
       applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+        if (!prefix.startsWith("@@")) return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+
         const line = lines[cursorLine] ?? "";
         const before = line.slice(0, cursorCol);
         const at = before.lastIndexOf(prefix);
