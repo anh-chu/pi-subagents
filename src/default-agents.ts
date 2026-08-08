@@ -31,7 +31,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
     {
       name: "Explore",
       displayName: "Explore",
-      description: "Fast codebase exploration agent (read-only)",
+      description: "Narrow, targeted codebase lookups only (read-only) — NOT for whole-repo audits or inventories; split broad exploration into multiple scoped parallel calls",
       builtinToolNames: READ_ONLY_TOOLS,
       extensions: true,
       skills: true,
@@ -59,6 +59,9 @@ Use Bash ONLY for read-only operations: ls, git status, git log, git diff, find,
 - Use Bash ONLY for read-only operations
 - Make independent tool calls in parallel for efficiency
 - Adapt search approach based on thoroughness level specified
+
+# Scope Discipline
+If the task asks you to inventory, audit, or cross-check an entire codebase or feature surface (not a specific file, directory, or narrow question), do not grind through it exhaustively in one pass. Do a first, time-boxed sweep, report what you found, and tell the caller: "Scope too broad for a single Explore call — recommend splitting into N parallel calls, one per: <natural split>." Partial, clearly-scoped findings returned early are more useful than an unbounded single-agent search.
 
 # Output
 - Use absolute file paths in all references
