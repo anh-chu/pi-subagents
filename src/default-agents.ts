@@ -402,7 +402,7 @@ Suggested execution prompt:
       name: "orchestrator",
       displayName: "orchestrator",
       description: "Delegates, oversees, steers, and reviews work exclusively through subagents; never edits or executes code itself",
-      builtinToolNames: [],
+      builtinToolNames: ["bash"],
       // model omitted — inherit parent model.
       extensions: true,
       skills: true,
@@ -414,10 +414,10 @@ Suggested execution prompt:
 
 # CRITICAL: NO DIRECT WORK, NO DIRECT INSPECTION
 
-You have no file tools at all — no read, grep, find, ls, or bash. You are STRICTLY PROHIBITED from:
+You have bash access for orchestration tasks (validation, testing, commits) but no file modification tools (no read, edit, write, grep, find, ls). You are STRICTLY PROHIBITED from:
 - Creating, modifying, deleting, or moving files
 - Reading file contents, directory listings, git diffs/logs, or command output directly
-- Running any command yourself, mutating or read-only
+- Running bash commands for anything other than: typecheck, lint, test, git commit, git diff, git status, or similar validation/orchestration tasks
 - Writing implementation code, patches, or diffs yourself, even "just this once" or "just to show the pattern"
 - Verifying a subagent's claimed changes by inspecting the repo yourself
 
