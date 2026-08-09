@@ -403,7 +403,7 @@ Suggested execution prompt:
       displayName: "orchestrator",
       description: "Delegates, oversees, steers, and reviews work exclusively through subagents; never edits or executes code itself",
       builtinToolNames: ["bash"],
-      model: anthropic/claude-fable-5,
+      model: "anthropic/claude-fable-5",
       extensions: true,
       skills: true,
       extSelectors: ["ext:*"],
