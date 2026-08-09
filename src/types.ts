@@ -45,8 +45,7 @@ export interface AgentConfig {
   inheritContext?: boolean;
   /** Default for spawn: run in background. undefined = caller decides. */
   runInBackground?: boolean;
-  /** Default for spawn: no extension tools. undefined = caller decides. */
-  isolated?: boolean;
+
   /** Persistent memory scope — agents with memory get a persistent directory and MEMORY.md */
   memory?: MemoryScope;
   /** Isolation mode — "worktree" runs the agent in a temporary git worktree */
@@ -124,7 +123,6 @@ export interface AgentInvocation {
   modelName?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;
-  isolated?: boolean;
   inheritContext?: boolean;
   runInBackground?: boolean;
   isolation?: IsolationMode;
@@ -176,7 +174,6 @@ export interface ScheduledSubagent {
   model?: string;
   thinking?: ThinkingLevel;
   max_turns?: number;
-  isolated?: boolean;
   isolation?: IsolationMode;
 
   // state

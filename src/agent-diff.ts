@@ -31,7 +31,6 @@ interface NormalizedConfig {
   extSelectors: string | undefined;
   inheritContext: string | undefined;
   runInBackground: string | undefined;
-  isolated: string | undefined;
   memory: string | undefined;
   isolation: string | undefined;
   recoverOnAbort: string | undefined;
@@ -61,7 +60,6 @@ function normalize(cfg: AgentConfig): NormalizedConfig {
     extSelectors: fmtArr(extSel),
     inheritContext: fmtBool(cfg.inheritContext),
     runInBackground: fmtBool(cfg.runInBackground),
-    isolated: fmtBool(cfg.isolated),
     memory: cfg.memory ?? undefined,
     isolation: cfg.isolation ?? undefined,
     recoverOnAbort: fmtBool(cfg.recoverOnAbort),
@@ -83,7 +81,6 @@ const FIELD_LABELS: Record<keyof NormalizedConfig, string> = {
   extSelectors: "Extension selectors",
   inheritContext: "Inherit context",
   runInBackground: "Run in background",
-  isolated: "Isolated",
   memory: "Memory",
   isolation: "Isolation",
   recoverOnAbort: "Recover on abort",
@@ -172,7 +169,6 @@ export function diffFromDefault(cfg: AgentConfig): DiffEntry[] | null {
   compare("extSelectors");
   compare("inheritContext");
   compare("runInBackground");
-  compare("isolated");
   compare("memory");
   compare("isolation");
   compare("recoverOnAbort");

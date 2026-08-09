@@ -83,7 +83,7 @@ export interface AgentDetails {
   modelName?: string;
   /** Effective explicit thinking level for display. */
   thinkingLevel?: ThinkingLevel;
-  /** Notable config tags (e.g. ["isolated"]). */
+  /** Notable config tags (e.g. ["thinking: high"]). */
   tags?: string[];
   /** Current turn count. */
   turnCount?: number;
@@ -172,7 +172,6 @@ export function buildInvocationTags(
   const tags: string[] = [];
   if (!invocation) return { tags };
   if (invocation.thinking) tags.push(`thinking: ${invocation.thinking}`);
-  if (invocation.isolated) tags.push("isolated");
   if (invocation.isolation === "worktree") tags.push("worktree");
   if (invocation.inheritContext) tags.push("inherit context");
   if (invocation.runInBackground) tags.push("background");

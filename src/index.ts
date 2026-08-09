@@ -658,7 +658,7 @@ export default function (pi: ExtensionAPI) {
   // Config tags surfaced to the invoking agent in the type list so it can
   // route and budget without trial-and-error. Fields included only when set:
   //   model + lock_model (done), max_turns, inherit_context
-  // Other frontmatter fields (thinking, isolated, skills, memory, prompt_mode,
+  // Other frontmatter fields (thinking, skills, memory, prompt_mode,
   // isolation, extensions) are operational tuning, not routing-relevant, and
   // would just add token cost to the tool description every turn.
   const buildConfigTags = (cfg: AgentConfig | undefined): string => {
@@ -912,11 +912,6 @@ Notes:
           },
         ),
       ),
-      isolated: Type.Optional(
-        Type.Boolean({
-          description: "No extension/MCP tools.",
-        }),
-      ),
       inherit_context: Type.Optional(
         Type.Boolean({
           description: "Fork parent conversation. Default: false.",
@@ -1075,7 +1070,6 @@ Notes:
       const thinking = resolvedConfig.thinking;
       const inheritContext = resolvedConfig.inheritContext;
       const runInBackground = resolvedConfig.runInBackground;
-      const isolated = resolvedConfig.isolated;
       const isolation = resolvedConfig.isolation;
 
       // Build display tags for non-default config
@@ -1090,7 +1084,6 @@ Notes:
         thinking,
         // Explicit value only — the default fallback would just add noise.
         maxTurns: resolvedConfig.maxTurns,
-        isolated,
         inheritContext,
         runInBackground,
         isolation,
@@ -1135,7 +1128,6 @@ Notes:
             model: params.model as string | undefined,
             thinking: thinking,
             max_turns: effectiveMaxTurns,
-            isolated: isolated,
             isolation: isolation,
           });
           const next = scheduler.getNextRun(job.id);
@@ -1190,7 +1182,6 @@ Notes:
             description: params.description,
             model,
             maxTurns: effectiveMaxTurns,
-            isolated,
             inheritContext,
             thinkingLevel: thinking,
             isBackground: true,
@@ -1318,7 +1309,6 @@ Notes:
           description: params.description,
           model,
           maxTurns: effectiveMaxTurns,
-          isolated,
           inheritContext,
           thinkingLevel: thinking,
           isolation,
@@ -1374,7 +1364,6 @@ Notes:
               description: params.description,
               model,
               maxTurns: effectiveMaxTurns,
-              isolated,
               inheritContext,
               thinkingLevel: thinking,
               isolation,
@@ -1796,7 +1785,6 @@ Notes:
     }
     const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
     const thinking = resolvedConfig.thinking;
-    const isolated = resolvedConfig.isolated;
     const inheritContext = resolvedConfig.inheritContext;
     const isolation = resolvedConfig.isolation;
     const displayName = getDisplayName(name);
@@ -1806,7 +1794,6 @@ Notes:
         : undefined,
       thinking,
       maxTurns: resolvedConfig.maxTurns,
-      isolated,
       inheritContext,
       runInBackground: true,
       isolation,
@@ -1828,7 +1815,6 @@ Notes:
         description: idle ? `${displayName} (idle)` : prompt.slice(0, 60),
         model,
         maxTurns: effectiveMaxTurns,
-        isolated,
         inheritContext: idle ? false : inheritContext,
         thinkingLevel: thinking,
         isBackground: true,
@@ -2053,7 +2039,6 @@ Notes:
     if (cfg.disallowedTools?.length) fmFields.push(`disallowed_tools: ${cfg.disallowedTools.join(", ")}`);
     if (cfg.inheritContext) fmFields.push("inherit_context: true");
     if (cfg.runInBackground) fmFields.push("run_in_background: true");
-    if (cfg.isolated) fmFields.push("isolated: true");
     if (cfg.memory) fmFields.push(`memory: ${cfg.memory}`);
     if (cfg.isolation) fmFields.push(`isolation: ${cfg.isolation}`);
 
@@ -2179,7 +2164,6 @@ skills: <true (inherit all), false (none), or comma-separated skill names to pre
 disallowed_tools: <comma-separated tool names to block, even if otherwise available. Omit for none>
 inherit_context: <true to fork parent conversation into agent so it sees chat history. Default: false>
 run_in_background: <false to block until the agent finishes. Default: true>
-isolated: <true for no extension/MCP tools, only built-in tools. Default: false>
 memory: <"user" (global), "project" (per-project), or "local" (gitignored per-project) for persistent memory. Omit for none>
 isolation: <"worktree" to run in isolated git worktree. Omit for normal>
 ---
@@ -2193,7 +2177,6 @@ Guidelines for choosing settings:
 - Use prompt_mode: append if the agent should keep the default system prompt and add specialization on top
 - Use prompt_mode: replace for fully custom agents with their own personality/instructions
 - Set inherit_context: true if the agent needs to know what was discussed in the parent conversation
-- Set isolated: true if the agent should NOT have access to MCP servers or other extensions
 - Only include frontmatter fields that differ from defaults — omit fields where the default is fine
 
 Write the file using the write tool. Only write the file, nothing else.`;

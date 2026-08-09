@@ -6,7 +6,6 @@ interface AgentInvocationParams {
   max_turns?: number;
   run_in_background?: boolean;
   inherit_context?: boolean;
-  isolated?: boolean;
   isolation?: IsolationMode;
 }
 
@@ -20,7 +19,6 @@ export function resolveAgentInvocationConfig(
   maxTurns?: number;
   inheritContext: boolean;
   runInBackground: boolean;
-  isolated: boolean;
   isolation?: IsolationMode;
 } {
   // Parent override wins UNLESS the agent locks its model AND defines one.
@@ -39,7 +37,6 @@ export function resolveAgentInvocationConfig(
     maxTurns: agentConfig?.maxTurns ?? params.max_turns,
     inheritContext: agentConfig?.inheritContext ?? params.inherit_context ?? false,
     runInBackground: agentConfig?.runInBackground ?? params.run_in_background ?? true,
-    isolated: agentConfig?.isolated ?? params.isolated ?? false,
     isolation: agentConfig?.isolation ?? params.isolation,
   };
 }

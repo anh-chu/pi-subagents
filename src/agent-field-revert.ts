@@ -20,7 +20,6 @@ const FRONTMATTER_KEYS: Partial<Record<string, string>> = {
   skills: "skills",
   inheritContext: "inherit_context",
   runInBackground: "run_in_background",
-  isolated: "isolated",
   memory: "memory",
   isolation: "isolation",
   recoverOnAbort: "recover_on_abort",
@@ -115,7 +114,6 @@ export function revertFieldToDefault(content: string, fieldKey: string, def: Age
     case "maxTurns": raw = def.maxTurns; break;
     case "inheritContext": raw = def.inheritContext; break;
     case "runInBackground": raw = def.runInBackground; break;
-    case "isolated": raw = def.isolated; break;
     case "memory": raw = def.memory; break;
     case "isolation": raw = def.isolation; break;
     case "recoverOnAbort": raw = def.recoverOnAbort; break;

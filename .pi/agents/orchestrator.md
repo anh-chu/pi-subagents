@@ -3,7 +3,7 @@ description: Delegates, oversees, steers, and reviews work exclusively through s
 tools: ext:*
 model: openai-codex/gpt-5.6-sol
 thinking: high
-prompt_mode: replace
+prompt_mode: append
 extensions: npm:pi-cache-optimizer, npm:pi-quiet-tools, npm:@fgladisch/pi-caveman, npm:pi-claude-oauth-adapter, https://github.com/nicobailon/pi-intercom, npm:@aliou/pi-neuralwatt, git:github.com/anh-chu/pi-subagents@upstream-plus-prs
 skills: false
 max_turns: 40

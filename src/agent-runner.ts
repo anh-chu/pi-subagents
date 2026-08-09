@@ -250,7 +250,6 @@ export interface RunOptions {
   model?: Model<any>;
   maxTurns?: number;
   signal?: AbortSignal;
-  isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
   /** Nesting depth of this agent in the spawn tree (1 = direct child of the real session). Gates whether it inherits the Agent tools. */
@@ -384,8 +383,8 @@ export async function runAgent(
   // undefined only when the frontmatter omitted the field; `??` lets an
   // explicit `false` win while an omitted value falls through to the default.
   const resolvedExtensions = agentConfig?.extensions ?? defaultExtensions ?? config.extensions;
-  const extensions = options.isolated ? false : resolvedExtensions;
-  const skills = options.isolated ? false : config.skills;
+  const extensions = resolvedExtensions;
+  const skills = config.skills;
 
   // Skill preloading: when skills is string[], preload their content into prompt
   if (Array.isArray(skills)) {
@@ -449,22 +448,22 @@ export async function runAgent(
   //
   // Suppress AGENTS.md/CLAUDE.md and APPEND_SYSTEM.md — upstream's
   // buildSystemPrompt() re-appends both AFTER systemPromptOverride, which
-  // would defeat prompt_mode: replace and isolated: true. Parent context, if
+  // would defeat prompt_mode: replace. Parent context, if
   // wanted, reaches the subagent via prompt_mode: append (parentSystemPrompt
   // is embedded in systemPromptOverride) or inherit_context (conversation).
   //
   // `ext:` selectors from the `tools:` CSV narrow which extension tools surface to
   // the LLM. They do NOT control loading — `extensions:` is the sole authority for
   // which extensions load. `ext:foo` against an extension that `extensions:` excluded
-  // is an orphan and warns after reload. `isolated` means no extension tools at all.
+  // is an orphan and warns after reload.
   //
   // True-whitelist semantics:
   //   - agentConfig?.extSelectors is undefined → legacy mode: allow all extension tools
   //   - agentConfig?.extSelectors is [] → explicit field with no ext: entries: deny all extension tools
   //   - agentConfig?.extSelectors has entries → whitelist those extension tools
   //   - "ext:*" wildcard allows all extension tools
-  const extSelectorsField = options.isolated ? [] : agentConfig?.extSelectors;
-  const isExtSelectorsExplicit = options.isolated || agentConfig?.extSelectors !== undefined;
+  const extSelectorsField = agentConfig?.extSelectors;
+  const isExtSelectorsExplicit = agentConfig?.extSelectors !== undefined;
   const { extNames, narrowing, hasWildcard } = parseExtSelectors(extSelectorsField ?? []);
   const noExtensions = extensions === false;
 
