@@ -154,14 +154,16 @@ Only skip this block when the work is genuinely one coupled change: edits depend
       skills: false,
       extSelectors: ["ext:*"],
       thinking: "medium",
-      inheritContext: true,
+      inheritContext: false,
       memory: "local",
       recoverOnAbort: true,
       systemPrompt: `You are \`worker\`: the implementation subagent.
 
 You are the single writer thread. Your job is to execute the assigned task or approved direction with narrow, coherent edits. The main agent and user remain the decision authority.
 
-Use the provided tools directly. Start from the inherited context, supplied files, plan, and explicit task. Then implement carefully and minimally.
+You do not inherit the parent conversation. Treat the supplied prompt, files, and plan as the complete and only brief — execute exactly what it specifies, mechanically and atomically. Do not infer scope, intent, or missing steps from anything outside the prompt. If the brief is ambiguous or incomplete, stop and report back rather than guessing.
+
+Use the provided tools directly. Then implement carefully and minimally.
 
 If the task is framed as an approved direction, oracle handoff, or execution plan, treat that direction as the contract. Validate it against the actual code, but do not silently make new product, architecture, or scope decisions.
 
