@@ -217,6 +217,7 @@ describe("enterAgentMode", () => {
         setEditorText: vi.fn(),
         notify: vi.fn(),
         setWidget: vi.fn(),
+        setStatus: vi.fn(),
       },
       sendMessage: vi.fn(async (msg: any, _opts: any) => {
         sentMessages.push(msg);
@@ -337,7 +338,7 @@ describe("enterAgentMode", () => {
     // Simulate the fresh instance registering commands and firing session_start,
     // which is what applies the pending model/tools/thinking switch.
     registerAgentModeCommands(pi);
-    const fakeNewCtx = { ui: { addAutocompleteProvider: vi.fn() } };
+    const fakeNewCtx = { ui: { addAutocompleteProvider: vi.fn(), setWidget: vi.fn(), setStatus: vi.fn() } };
     for (const handler of sessionStartHandlers) {
       await handler({}, fakeNewCtx);
     }

@@ -278,6 +278,7 @@ export async function enterAgentMode(
     withSession: async (replacementCtx) => {
       replacementCtx.ui.setEditorText("");
       replacementCtx.ui.setWidget("agent-mode", breadcrumb);
+      replacementCtx.ui.setStatus("agent-mode-status", `Agent: ${displayName}`);
       replacementCtx.ui.notify(`Switched to ${displayName} mode. New session started.`, "info");
     },
   });
@@ -293,6 +294,14 @@ export async function enterAgentMode(
 
 /** Register /agent-mode, /agent-mode-off, and the "@@" autocomplete shorthand. */
 export function registerAgentModeCommands(pi: ExtensionAPI): void {
+  // Clears the breadcrumb banner as soon as the user sends their first prompt
+  // in agent-mode. (Idempotent on later turns — clearing an already-cleared widget is harmless.)
+  pi.on("before_agent_start", async (_event, ctx) => {
+    if (currentMode.activeAgent) {
+      ctx.ui.setWidget("agent-mode", undefined);
+    }
+  });
+
   // Applies a pending model/tools/thinking switch queued by enterAgentMode()
   // just before it called ctx.newSession(). Runs once per fresh instance,
   // using this instance's own (valid) pi, then clears the flag.
@@ -324,6 +333,9 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
   // Enter still dispatches it as a normal slash command). See the module
   // doc comment for why this can't be a direct chat-text trigger instead.
   pi.on("session_start", async (_event, ctx) => {
+    if (currentMode.activeAgent) {
+      ctx.ui.setStatus("agent-mode-status", `Agent: ${currentMode.displayName}`);
+    }
     ctx.ui.addAutocompleteProvider((current: AutocompleteProvider): AutocompleteProvider => ({
       async getSuggestions(lines, cursorLine, cursorCol, options) {
         const line = lines[cursorLine] ?? "";
@@ -362,6 +374,13 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
     }));
   });
 
+  // Defensive cleanup: clear status indicator when session shuts down while in agent-mode.
+  pi.on("session_shutdown", async (_event, ctx) => {
+    if (currentMode.activeAgent) {
+      ctx.ui.setStatus("agent-mode-status", undefined);
+    }
+  });
+
   pi.registerCommand("agent-mode", {
     description: "Switch to a fresh session configured as a subagent",
     handler: async (args, ctx) => {
@@ -384,6 +403,8 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
       const target = currentMode.parentSessionFile;
       const result = await ctx.switchSession(target, {
         withSession: async (replacementCtx) => {
+          replacementCtx.ui.setStatus("agent-mode-status", undefined);
+          replacementCtx.ui.setWidget("agent-mode", undefined);
           replacementCtx.ui.notify("Back to your previous session.", "info");
         },
       });
