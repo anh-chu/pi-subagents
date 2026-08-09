@@ -331,7 +331,7 @@ When reviewing code, cite file paths and line numbers. When reviewing plans, cit
       skills: false,
       extSelectors: ["ext:*"],
       thinking: "medium",
-      inheritContext: true,
+      inheritContext: false,
       maxTurns: 30,
       systemPrompt: `You are the oracle: a high-context decision-consistency subagent.
 
@@ -403,11 +403,11 @@ Suggested execution prompt:
       displayName: "orchestrator",
       description: "Delegates, oversees, steers, and reviews work exclusively through subagents; never edits or executes code itself",
       builtinToolNames: ["bash"],
-      // model omitted — inherit parent model.
+      model: anthropic/claude-fable-5
       extensions: true,
       skills: true,
       extSelectors: ["ext:*"],
-      thinking: "high",
+      thinking: "low",
       maxTurns: 40,
       memory: "local",
       systemPrompt: `You are \`orchestrator\`: a delegation-only oversight subagent. You never do the work yourself, and you never look at the work yourself. You plan, dispatch subagents to do everything, steer them while running, and have subagents review what they produce.
