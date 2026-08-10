@@ -59,6 +59,8 @@ export interface AgentConfig {
   /** true = refuse parent model override; agent-defined model is always used. Useful for read-only agents
    * like Explore/Plan where the model is load-bearing for their design. */
   lockModel?: boolean;
+  /** true = auto-apply this agent mode on new sessions if no agent mode is already active. */
+  defaultMode?: boolean;
   /** Where this agent was loaded from */
   source?: "default" | "project" | "global";
 }
