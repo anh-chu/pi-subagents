@@ -471,6 +471,32 @@ describe("auto-apply default agent mode", () => {
     expect(getAgentMode().activeAgent).toBe("default-agent");
   });
 
+  it("persists model and thinking in auto-applied config entry", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["smart-agent", baseConfig({ name: "smart-agent", defaultMode: true, model: "anthropic/sonnet", thinking: "high" })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    registerAgentModeCommands(pi);
+
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "new" }, ctx);
+    }
+
+    expect(ctx.sessionManager.appendCustomEntry).toHaveBeenCalledWith(
+      "agent-mode-config",
+      expect.objectContaining({
+        agentName: "smart-agent",
+        modelProvider: "anthropic",
+        modelId: "sonnet",
+        thinking: "high",
+      }),
+    );
+  });
+
   it("applies first alphabetically when multiple default agents exist", async () => {
     const userAgents = new Map<string, AgentConfig>([
       ["zebra-agent", baseConfig({ name: "zebra-agent", defaultMode: true })],
@@ -539,7 +565,7 @@ describe("auto-apply default agent mode", () => {
     registerAgents(userAgents);
 
     const existingEntries = [
-      { type: "agent-mode-config", data: { agentName: "other-agent" } },
+      { type: "custom", customType: "agent-mode-config", data: { agentName: "other-agent" } },
     ];
     const pi = fakePiWithTools();
     const ctx = fakeSessionStartCtx({ entries: existingEntries });
@@ -698,6 +724,35 @@ describe("agent-mode-off with auto-applied mode", () => {
     );
     expect(ctx.switchSession).not.toHaveBeenCalled(); // Should not try to switch
     expect(getAgentMode().activeAgent).toBeUndefined();
+  });
+
+  it("writes exit marker on agent-mode-off without parent", async () => {
+    setAgentMode({ activeAgent: "default-agent", displayName: "Default" }); // no parentSessionFile
+
+    const pi = fakePiWithTools();
+    let agentModeOffHandler: ((args: string, cmdCtx: any) => Promise<void>) | null = null;
+    (pi.registerCommand as any) = vi.fn((cmd: string, opts: any) => {
+      if (cmd === "agent-mode-off") {
+        agentModeOffHandler = opts.handler;
+      }
+    });
+
+    registerAgentModeCommands(pi);
+
+    const ctx: any = {
+      ui: {
+        setStatus: vi.fn(),
+        setWidget: vi.fn(),
+        notify: vi.fn(),
+      },
+      switchSession: vi.fn(),
+    };
+
+    expect(agentModeOffHandler).not.toBeNull();
+    await agentModeOffHandler!("", ctx);
+
+    // Should have written exit marker before clearing
+    expect(pi.appendEntry).toHaveBeenCalledWith("agent-mode-exit", {});
   });
 });
 

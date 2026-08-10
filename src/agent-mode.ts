@@ -160,6 +160,9 @@ async function applyAgentModeToSession(
     displayName,
     systemPrompt,
     tools,
+    modelProvider: resolvedModel?.provider,
+    modelId: resolvedModel?.id,
+    thinking: config.thinking,
   } as AgentModeEntryData);
 
   ctx.sessionManager.appendCustomMessageEntry(
@@ -418,8 +421,7 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
     if (isNewSession) {
       const entries = (ctx?.sessionManager?.getEntries?.() as any[]) ?? [];
       // Check for existing config in both old and new entry formats
-      const hasExistingConfig = findLatestAgentModeConfig(entries) !== undefined ||
-        entries.some((e: any) => e?.type === "agent-mode-config");
+      const hasExistingConfig = findLatestAgentModeConfig(entries) !== undefined;
 
       if (!hasExistingConfig) {
         const candidates = getAvailableTypes()
@@ -556,6 +558,8 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
       }
       // If no parentSessionFile (e.g., auto-applied mode), just clear mode and notify
       if (!currentMode.parentSessionFile) {
+        // Persist an exit marker so a later resume does not rehydrate agent-mode
+        pi.appendEntry("agent-mode-exit", {});
         ctx.ui.setStatus("agent-mode-status", undefined);
         ctx.ui.setWidget("agent-mode", undefined);
         clearAgentMode();
