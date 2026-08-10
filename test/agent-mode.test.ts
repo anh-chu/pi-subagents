@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type AgentModeEntryData,
   buildAgentModePrompt,
   clearAgentMode,
   enterAgentMode,
@@ -697,5 +698,126 @@ describe("agent-mode-off with auto-applied mode", () => {
     );
     expect(ctx.switchSession).not.toHaveBeenCalled(); // Should not try to switch
     expect(getAgentMode().activeAgent).toBeUndefined();
+  });
+});
+
+describe("agent-mode resume rehydration", () => {
+  function rehydratePi() {
+    return {
+      on: vi.fn(),
+      setModel: vi.fn(async () => true),
+      setThinkingLevel: vi.fn(),
+      setActiveTools: vi.fn(),
+      appendEntry: vi.fn(),
+      registerCommand: vi.fn(),
+      getAllTools: vi.fn(() => []),
+    } as unknown as ExtensionAPI;
+  }
+
+  function rehydrateCtx(entries: any[]) {
+    return {
+      sessionManager: { getEntries: vi.fn(() => entries) },
+      modelRegistry: {
+        find: vi.fn((provider: string, modelId: string) =>
+          provider === "anthropic" && modelId === "sonnet" ? { id: modelId, provider } : undefined,
+        ),
+      },
+      ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn(), addAutocompleteProvider: vi.fn() },
+    };
+  }
+
+  function configEntry(data: Partial<AgentModeEntryData> = {}) {
+    return {
+      type: "custom",
+      customType: "agent-mode-config",
+      data: {
+        agentName: "worker",
+        displayName: "Worker",
+        systemPrompt: "prompt",
+        tools: ["read", "bash"],
+        modelProvider: "anthropic",
+        modelId: "sonnet",
+        thinking: "low",
+        parentSessionFile: "/session/parent",
+        ...data,
+      },
+    };
+  }
+
+  async function fireSessionStart(pi: ExtensionAPI, ctx: any, reason: string) {
+    const handlers: Array<(event: any, hctx: any) => Promise<void> | void> = [];
+    (pi as any).on = vi.fn((event: string, handler: any) => {
+      if (event === "session_start") handlers.push(handler);
+    });
+    registerAgentModeCommands(pi);
+    for (const handler of handlers) {
+      await handler({ reason }, ctx);
+    }
+  }
+
+  it("rehydrates state, model, tools, thinking on resume", async () => {
+    const pi = rehydratePi();
+    const ctx = rehydrateCtx([configEntry()]);
+    await fireSessionStart(pi, ctx, "resume");
+
+    expect(getAgentMode()).toEqual({
+      activeAgent: "worker",
+      displayName: "Worker",
+      parentSessionFile: "/session/parent",
+    });
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("agent-mode-status", "Agent: Worker");
+    expect(pi.setModel).toHaveBeenCalledWith({ id: "sonnet", provider: "anthropic" });
+    expect(pi.setThinkingLevel).toHaveBeenCalledWith("low");
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash"]);
+  });
+
+  it("does not rehydrate when exit marker follows config", async () => {
+    const pi = rehydratePi();
+    const ctx = rehydrateCtx([configEntry(), { type: "custom", customType: "agent-mode-exit", data: {} }]);
+    await fireSessionStart(pi, ctx, "resume");
+
+    expect(getAgentMode()).toEqual({});
+    expect(pi.setModel).not.toHaveBeenCalled();
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
+  });
+
+  it("rehydrates from a config entry written after an earlier exit", async () => {
+    const pi = rehydratePi();
+    const ctx = rehydrateCtx([
+      configEntry({ displayName: "Old" }),
+      { type: "custom", customType: "agent-mode-exit", data: {} },
+      configEntry({ displayName: "New" }),
+    ]);
+    await fireSessionStart(pi, ctx, "resume");
+    expect(getAgentMode().displayName).toBe("New");
+  });
+
+  it("warns on unresolvable model but still applies tools and thinking", async () => {
+    const pi = rehydratePi();
+    const ctx = rehydrateCtx([configEntry({ modelProvider: "gone", modelId: "missing" })]);
+    await fireSessionStart(pi, ctx, "resume");
+
+    expect(pi.setModel).not.toHaveBeenCalled();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "agent-mode-warning",
+      expect.objectContaining({ message: expect.stringContaining("gone/missing") }),
+    );
+    expect(pi.setThinkingLevel).toHaveBeenCalledWith("low");
+    expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash"]);
+  });
+
+  it("does nothing for reason \"new\" without pendingApply", async () => {
+    const pi = rehydratePi();
+    const ctx = rehydrateCtx([configEntry()]);
+    await fireSessionStart(pi, ctx, "new");
+    expect(getAgentMode()).toEqual({});
+    expect(pi.setModel).not.toHaveBeenCalled();
+  });
+
+  it("does not re-append agent-mode instructions on resume", async () => {
+    const pi = rehydratePi();
+    const ctx = rehydrateCtx([configEntry()]);
+    await fireSessionStart(pi, ctx, "resume");
+    expect((pi as any).appendEntry).not.toHaveBeenCalledWith("agent-mode-instructions", expect.anything());
   });
 });

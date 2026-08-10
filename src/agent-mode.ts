@@ -39,7 +39,7 @@
 
 import type { Model } from "@mariozechner/pi-ai";
 import type { AutocompleteItem, AutocompleteProvider } from "@mariozechner/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext, SessionStartEvent } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { detectEnv } from "./env.js";
 import { resolveModel } from "./model-resolver.js";
@@ -89,6 +89,20 @@ interface PendingAgentModeApply {
   thinking?: ThinkingLevel;
 }
 let pendingApply: PendingAgentModeApply | undefined;
+
+/**
+ * Latest "agent-mode-config" entry not superseded by a later
+ * "agent-mode-exit" marker. Scans backward; whichever appears last wins.
+ */
+export function findLatestAgentModeConfig(entries: any[]): AgentModeEntryData | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e?.type !== "custom") continue;
+    if (e.customType === "agent-mode-exit") return undefined;
+    if (e.customType === "agent-mode-config") return e.data as AgentModeEntryData;
+  }
+  return undefined;
+}
 
 /** Build the system prompt for the new agent-mode session. */
 export async function buildAgentModePrompt(
@@ -220,6 +234,12 @@ export interface AgentModeEntryData {
   displayName: string;
   systemPrompt: string;
   tools: string[];
+  /** Provider of the resolved model at switch time, for resume rehydration. */
+  modelProvider?: string;
+  /** Id of the resolved model at switch time, for resume rehydration. */
+  modelId?: string;
+  thinking?: ThinkingLevel;
+  parentSessionFile?: string;
 }
 
 function truncate(text: string | undefined, max = 160): string | undefined {
@@ -321,6 +341,10 @@ export async function enterAgentMode(
         displayName,
         systemPrompt,
         tools,
+        modelProvider: resolvedModel?.provider,
+        modelId: resolvedModel?.id,
+        thinking: config.thinking,
+        parentSessionFile,
       } as AgentModeEntryData);
 
       // Seed the conversation with the agent's system prompt so the first user
@@ -362,19 +386,42 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
   // Applies a pending model/tools/thinking switch queued by enterAgentMode()
   // just before it called ctx.newSession(). Runs once per fresh instance,
   // using this instance's own (valid) pi, then clears the flag.
-  // Also auto-applies default agent mode on fresh new sessions if conditions allow.
-  pi.on("session_start", async (event: SessionStartEvent | undefined, ctx: any) => {
-    const isNewSession = event?.reason === "new" || event?.reason === "startup";
-    const skipReasons = new Set(["resume", "reload", "fork"]);
-    const shouldSkip = event && skipReasons.has(event.reason);
+  // Also auto-applies default agent mode on fresh new sessions and rehydrates
+  // agent-mode sessions on resume/reload/fork.
+  pi.on("session_start", async (event, ctx) => {
+    // 1. Apply pending model/tools/thinking (from enterAgentMode)
+    if (pendingApply) {
+      const { model, tools, thinking } = pendingApply;
+      pendingApply = undefined;
+      if (model) {
+        try {
+          const ok = await pi.setModel(model);
+          if (!ok) {
+            pi.appendEntry("agent-mode-warning", { message: `No API key for ${model.provider}/${model.id}` });
+          }
+        } catch {
+          // Ignore — leave the session on whatever default model it started with.
+        }
+      }
+      if (thinking) {
+        pi.setThinkingLevel(thinking);
+      }
+      if (tools) {
+        pi.setActiveTools(tools);
+      }
+      return;
+    }
 
-    // Auto-apply: check conditions
-    if (isNewSession && !shouldSkip && !pendingApply) {
+    // 2. Auto-apply default agent mode on fresh new sessions
+    const reason = event?.reason;
+    const isNewSession = reason === "new" || reason === "startup";
+    if (isNewSession) {
       const entries = (ctx?.sessionManager?.getEntries?.() as any[]) ?? [];
-      const hasExistingConfig = entries.some((e: any) => e.type === "agent-mode-config");
+      // Check for existing config in both old and new entry formats
+      const hasExistingConfig = findLatestAgentModeConfig(entries) !== undefined ||
+        entries.some((e: any) => e?.type === "agent-mode-config");
 
       if (!hasExistingConfig) {
-        // Find first enabled agent with defaultMode:true, alphabetically
         const candidates = getAvailableTypes()
           .map(name => ({ name, config: getAgentConfig(name) }))
           .filter(({ config }) => config?.defaultMode === true)
@@ -384,38 +431,53 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
           const { config } = candidates[0];
           if (config) {
             try {
-              await applyAgentModeToSession(pi, ctx, config);
+              await applyAgentModeToSession(pi, ctx as any, config);
               if (ctx?.ui?.notify) {
                 ctx.ui.notify(`Auto-applied agent mode: ${config.displayName ?? config.name}`, "info");
               }
             } catch (err) {
-              // Silently ignore auto-apply errors; session continues with normal defaults
               console.error("agent-mode auto-apply failed:", err);
             }
           }
         }
       }
+      return;
     }
 
-    // Apply pending model/tools/thinking (from enterAgentMode)
-    if (!pendingApply) return;
-    const { model, tools, thinking } = pendingApply;
-    pendingApply = undefined;
-    if (model) {
-      try {
-        const ok = await pi.setModel(model);
-        if (!ok) {
-          pi.appendEntry("agent-mode-warning", { message: `No API key for ${model.provider}/${model.id}` });
+    // 3. Rehydrate agent-mode when resumed/reloaded/forked
+    if (reason !== "resume" && reason !== "reload" && reason !== "fork") return;
+    if (currentMode.activeAgent) return;
+    const data = findLatestAgentModeConfig(ctx.sessionManager.getEntries() as any[]);
+    if (!data) return;
+
+    setAgentMode({
+      activeAgent: data.agentName,
+      displayName: data.displayName,
+      parentSessionFile: data.parentSessionFile,
+    });
+    ctx.ui.setStatus("agent-mode-status", `Agent: ${data.displayName}`);
+    if (data.modelProvider && data.modelId) {
+      const model = ctx.modelRegistry.find(data.modelProvider, data.modelId);
+      if (model) {
+        try {
+          const ok = await pi.setModel(model);
+          if (!ok) {
+            pi.appendEntry("agent-mode-warning", { message: `No API key for ${data.modelProvider}/${data.modelId}` });
+          }
+        } catch {
+          // Ignore — leave the session on whatever model it resumed with.
         }
-      } catch {
-        // Ignore — leave the session on whatever default model it started with.
+      } else {
+        pi.appendEntry("agent-mode-warning", {
+          message: `Model ${data.modelProvider}/${data.modelId} not available; keeping current model`,
+        });
       }
     }
-    if (thinking) {
-      pi.setThinkingLevel(thinking);
+    if (data.thinking) {
+      pi.setThinkingLevel(data.thinking);
     }
-    if (tools) {
-      pi.setActiveTools(tools);
+    if (data.tools) {
+      pi.setActiveTools(data.tools);
     }
   });
 
@@ -501,6 +563,9 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
         return;
       }
       const target = currentMode.parentSessionFile;
+      // Persist an exit marker in THIS (agent) session's log before switching
+      // away, so a later resume of this session does not rehydrate agent-mode.
+      pi.appendEntry("agent-mode-exit", {});
       const result = await ctx.switchSession(target, {
         withSession: async (replacementCtx) => {
           replacementCtx.ui.setStatus("agent-mode-status", undefined);
