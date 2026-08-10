@@ -12,19 +12,27 @@ export interface PromptExtras {
   skillBlocks?: { name: string; content: string }[];
 }
 
+/** Options for buildAgentPrompt behavior. */
+export interface BuildAgentPromptOptions {
+  /** Context in which the prompt is being used. "spawn" for agent spawning (sub-agent), "agent-mode" for agent-mode injection. */
+  context?: "spawn" | "agent-mode";
+}
+
 /**
  * Build the system prompt for an agent from its config.
  *
  * - "replace" mode: env header + config.systemPrompt (full control, no parent identity)
- * - "append" mode: env header + parent system prompt + sub-agent context + config.systemPrompt
- * - "append" with empty systemPrompt: pure parent clone
+ * - "append" mode with context="spawn" (default): env header + parent system prompt + sub-agent context + config.systemPrompt
+ * - "append" mode with context="agent-mode": env header + config.systemPrompt (no inherited system prompt or sub-agent context, as real parent is already natively present)
+ * - "append" with empty systemPrompt: pure parent clone (spawn mode only)
  *
  * Both modes prepend an `<active_agent name="${config.name}"/>` tag so downstream
  * extensions (e.g. permission/policy systems) can resolve per-agent policy
  * inside the child session by parsing the system prompt.
  *
- * @param parentSystemPrompt  The parent agent's effective system prompt (for append mode).
+ * @param parentSystemPrompt  The parent agent's effective system prompt (for append mode with context="spawn").
  * @param extras  Optional extra sections to inject (memory, preloaded skills).
+ * @param opts  Options for prompt building (context, etc.). Default context is "spawn".
  */
 export function buildAgentPrompt(
   config: AgentConfig,
@@ -32,6 +40,7 @@ export function buildAgentPrompt(
   env: EnvInfo,
   parentSystemPrompt?: string,
   extras?: PromptExtras,
+  opts?: BuildAgentPromptOptions,
 ): string {
   const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
 
@@ -53,6 +62,17 @@ Platform: ${env.platform}`;
   const extrasSuffix = extraSections.length > 0 ? "\n\n" + extraSections.join("\n") : "";
 
   if (config.promptMode === "append") {
+    const customSection = config.systemPrompt?.trim()
+      ? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
+      : "";
+
+    // For agent-mode context, skip the inherited system prompt and sub-agent context,
+    // since the real parent prompt is already natively present in the new session.
+    if (opts?.context === "agent-mode") {
+      return activeAgentTag + envBlock + customSection + extrasSuffix;
+    }
+
+    // Default "spawn" context: include inherited system prompt and sub-agent context bridge.
     const identity = parentSystemPrompt || genericBase;
 
     const bridge = `<sub_agent_context>
@@ -67,10 +87,6 @@ You are operating as a sub-agent invoked to handle a specific task.
 - Do not use emojis
 - Be concise but complete
 </sub_agent_context>`;
-
-    const customSection = config.systemPrompt?.trim()
-      ? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
-      : "";
 
     return activeAgentTag + envBlock + "\n\n<inherited_system_prompt>\n" + identity + "\n</inherited_system_prompt>\n\n" + bridge + customSection + extrasSuffix;
   }

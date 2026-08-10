@@ -309,6 +309,115 @@ describe("buildAgentPrompt", () => {
     expect(prompt).not.toContain("Preloaded Skill");
   });
 
+  describe("agent-mode context", () => {
+    it("append mode with agent-mode context excludes inherited_system_prompt and sub_agent_context", () => {
+      const config: AgentConfig = {
+        name: "agent-mode-append",
+        description: "Agent mode append",
+        builtinToolNames: [],
+        extensions: true,
+        skills: true,
+        systemPrompt: "Append-mode custom instructions.",
+        promptMode: "append",
+        inheritContext: false,
+        runInBackground: false,
+        isolated: false,
+      };
+      const parentPrompt = "Parent system prompt.";
+      const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt, undefined, { context: "agent-mode" });
+      expect(prompt).toContain("<active_agent name=\"agent-mode-append\"/>");
+      expect(prompt).toContain("<agent_instructions>");
+      expect(prompt).toContain("Append-mode custom instructions.");
+      expect(prompt).not.toContain("<inherited_system_prompt>");
+      expect(prompt).not.toContain("<sub_agent_context>");
+      expect(prompt).not.toContain("general-purpose coding agent");
+      expect(prompt).not.toContain("Parent system prompt");
+    });
+
+    it("append mode with agent-mode context and empty systemPrompt has no agent_instructions", () => {
+      const config: AgentConfig = {
+        name: "agent-mode-append-empty",
+        description: "Agent mode append empty",
+        builtinToolNames: [],
+        extensions: true,
+        skills: true,
+        systemPrompt: "",
+        promptMode: "append",
+        inheritContext: false,
+        runInBackground: false,
+        isolated: false,
+      };
+      const prompt = buildAgentPrompt(config, "/workspace", env, undefined, undefined, { context: "agent-mode" });
+      expect(prompt).toContain("<active_agent name=\"agent-mode-append-empty\"/>");
+      expect(prompt).toContain("# Environment");
+      expect(prompt).not.toContain("<agent_instructions>");
+      expect(prompt).not.toContain("<inherited_system_prompt>");
+      expect(prompt).not.toContain("<sub_agent_context>");
+    });
+
+    it("replace mode ignores context option", () => {
+      const config: AgentConfig = {
+        name: "replace-agent",
+        description: "Replace agent",
+        builtinToolNames: [],
+        extensions: true,
+        skills: true,
+        systemPrompt: "Replace mode instructions.",
+        promptMode: "replace",
+        inheritContext: false,
+        runInBackground: false,
+        isolated: false,
+      };
+      const prompt = buildAgentPrompt(config, "/workspace", env, undefined, undefined, { context: "agent-mode" });
+      expect(prompt).toContain("Replace mode instructions.");
+      expect(prompt).not.toContain("<inherited_system_prompt>");
+      expect(prompt).not.toContain("<sub_agent_context>");
+    });
+  });
+
+  describe("default context (spawn)", () => {
+    it("append mode without context option defaults to spawn behavior", () => {
+      const config: AgentConfig = {
+        name: "default-append",
+        description: "Default append",
+        builtinToolNames: [],
+        extensions: true,
+        skills: true,
+        systemPrompt: "Custom instructions.",
+        promptMode: "append",
+        inheritContext: false,
+        runInBackground: false,
+        isolated: false,
+      };
+      const parentPrompt = "Parent prompt.";
+      const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt);
+      expect(prompt).toContain("<inherited_system_prompt>");
+      expect(prompt).toContain("<sub_agent_context>");
+      expect(prompt).toContain("Parent prompt.");
+    });
+
+    it("append mode with explicit spawn context includes inherited_system_prompt and sub_agent_context", () => {
+      const config: AgentConfig = {
+        name: "spawn-append",
+        description: "Spawn append",
+        builtinToolNames: [],
+        extensions: true,
+        skills: true,
+        systemPrompt: "Spawn custom instructions.",
+        promptMode: "append",
+        inheritContext: false,
+        runInBackground: false,
+        isolated: false,
+      };
+      const parentPrompt = "Parent prompt for spawn.";
+      const prompt = buildAgentPrompt(config, "/workspace", env, parentPrompt, undefined, { context: "spawn" });
+      expect(prompt).toContain("<inherited_system_prompt>");
+      expect(prompt).toContain("<sub_agent_context>");
+      expect(prompt).toContain("Parent prompt for spawn.");
+      expect(prompt).toContain("Spawn custom instructions.");
+    });
+  });
+
   describe("active_agent tag", () => {
     it("tag is present at start of prompt in replace mode", () => {
       const config: AgentConfig = {

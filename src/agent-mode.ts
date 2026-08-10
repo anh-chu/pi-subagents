@@ -101,6 +101,8 @@ export async function buildAgentModePrompt(
     skillBlocks: Array.isArray(config.skills)
       ? preloadSkills(config.skills, cwd)
       : undefined,
+  }, {
+    context: "agent-mode",
   });
 }
 

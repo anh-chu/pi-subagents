@@ -171,6 +171,40 @@ describe("buildAgentModePrompt", () => {
     expect(prompt).toContain("<active_agent name=\"test-agent\"/>");
     expect(prompt).toContain("You are a test agent.");
   });
+
+  it("for append-mode agent: includes agent_instructions, excludes inherited_system_prompt and sub_agent_context", async () => {
+    const config: AgentConfig = {
+      name: "append-agent",
+      description: "Append agent",
+      systemPrompt: "Custom append-mode instructions.",
+      promptMode: "append",
+      builtinToolNames: ["read"],
+      extensions: true,
+      skills: false,
+      inheritContext: false,
+      runInBackground: false,
+      isolated: false,
+    };
+    const pi = {
+      exec: vi.fn(async (_cmd: string, args: string[]) => {
+        if (args.includes("--is-inside-work-tree")) {
+          return { code: 0, stdout: "true\n", stderr: "", killed: false };
+        }
+        if (args.includes("--show-current")) {
+          return { code: 0, stdout: "main\n", stderr: "", killed: false };
+        }
+        return { code: 0, stdout: "", stderr: "", killed: false };
+      }),
+    } as unknown as ExtensionAPI;
+
+    const prompt = await buildAgentModePrompt(pi, config, "/workspace");
+    expect(prompt).toContain("<active_agent name=\"append-agent\"/>");
+    expect(prompt).toContain("<agent_instructions>");
+    expect(prompt).toContain("Custom append-mode instructions.");
+    expect(prompt).not.toContain("<inherited_system_prompt>");
+    expect(prompt).not.toContain("<sub_agent_context>");
+    expect(prompt).not.toContain("general-purpose coding agent");
+  });
 });
 
 describe("enterAgentMode", () => {
