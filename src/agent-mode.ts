@@ -54,6 +54,8 @@ export interface AgentModeState {
   displayName?: string;
   /** Session file to return to via /agent-mode-off. */
   parentSessionFile?: string;
+  /** System prompt for the active agent, delivered via before_agent_start handler. */
+  systemPrompt?: string;
 }
 
 /** Per-extension-instance state. Only one agent-mode can be active at a time. */
@@ -188,7 +190,7 @@ async function applyAgentModeToSession(
   }
 
   // Update module state (no parent session for auto-apply)
-  setAgentMode({ activeAgent: config.name, displayName });
+  setAgentMode({ activeAgent: config.name, displayName, systemPrompt });
 
   return { model: resolvedModel, tools };
 }
@@ -373,11 +375,21 @@ export async function enterAgentMode(
     return;
   }
 
-  setAgentMode({ activeAgent: config.name, displayName, parentSessionFile });
+  setAgentMode({ activeAgent: config.name, displayName, parentSessionFile, systemPrompt });
 }
 
 /** Register /agent-mode, /agent-mode-off, and the "@@" autocomplete shorthand. */
 export function registerAgentModeCommands(pi: ExtensionAPI): void {
+  // Inject agent-mode system prompt deterministically via before_agent_start.
+  // This ensures the persona reaches the model on every turn, not just the first.
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (currentMode.activeAgent && currentMode.systemPrompt) {
+      return {
+        systemPrompt: event.systemPrompt + "\n\n" + currentMode.systemPrompt,
+      };
+    }
+  });
+
   // Clears the breadcrumb banner as soon as the user sends their first prompt
   // in agent-mode. (Idempotent on later turns — clearing an already-cleared widget is harmless.)
   pi.on("before_agent_start", async (_event, ctx) => {
@@ -433,6 +445,9 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
           const { config } = candidates[0];
           if (config) {
             try {
+              const systemPrompt = await buildAgentModePrompt(pi, config, ctx.cwd as any);
+              // Store system prompt before applying to session so before_agent_start handler can access it
+              setAgentMode({ activeAgent: config.name, displayName: config.displayName ?? config.name, systemPrompt });
               await applyAgentModeToSession(pi, ctx as any, config);
               if (ctx?.ui?.notify) {
                 ctx.ui.notify(`Auto-applied agent mode: ${config.displayName ?? config.name}`, "info");
@@ -452,10 +467,38 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
     const data = findLatestAgentModeConfig(ctx.sessionManager.getEntries() as any[]);
     if (!data) return;
 
+    // Restore system prompt: prefer persisted entry, fall back to reloading agent by name
+    let systemPrompt = data.systemPrompt;
+    if (!systemPrompt) {
+      try {
+        const config = getAgentConfig(data.agentName);
+        if (!config) {
+          // Agent not found; warn and continue without persona
+          console.warn(`agent-mode rehydration: agent "${data.agentName}" not found`);
+          if (pi.appendEntry) {
+            pi.appendEntry("agent-mode-warning", {
+              message: `Could not restore system prompt for agent "${data.agentName}"; persona may not be injected.`,
+            });
+          }
+        } else {
+          systemPrompt = await buildAgentModePrompt(pi, config, ctx.cwd as any);
+        }
+      } catch (err) {
+        // If both persist and reload fail, warn once and continue without persona injection
+        console.warn(`agent-mode rehydration: could not restore system prompt for "${data.agentName}":`, err);
+        if (pi.appendEntry) {
+          pi.appendEntry("agent-mode-warning", {
+            message: `Could not restore system prompt for agent "${data.agentName}"; persona may not be injected.`,
+          });
+        }
+      }
+    }
+
     setAgentMode({
       activeAgent: data.agentName,
       displayName: data.displayName,
       parentSessionFile: data.parentSessionFile,
+      systemPrompt,
     });
     ctx.ui.setStatus("agent-mode-status", `Agent: ${data.displayName}`);
     if (data.modelProvider && data.modelId) {

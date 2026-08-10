@@ -96,6 +96,12 @@ describe("agent mode state", () => {
     clearAgentMode();
     expect(getAgentMode()).toEqual({});
   });
+
+  it("stores and retrieves system prompt", () => {
+    const prompt = "You are a helpful assistant.";
+    setAgentMode({ activeAgent: "worker", displayName: "Worker", systemPrompt: prompt });
+    expect(getAgentMode().systemPrompt).toBe(prompt);
+  });
 });
 
 describe("resolveAgentModeModel", () => {
@@ -421,9 +427,9 @@ describe("enterAgentMode", () => {
     expect(instructionCalls[0].display).toBe(false);
 
     // Simulate the fresh instance registering commands and firing session_start,
-    // which is what applies the pending model/tools/thinking switch.
+    // which is what applies the pending model/tools/thinking switch and registers before_agent_start handler.
     registerAgentModeCommands(pi);
-    const fakeNewCtx = { ui: { addAutocompleteProvider: vi.fn(), setWidget: vi.fn(), setStatus: vi.fn() } };
+    const fakeNewCtx = { ui: { addAutocompleteProvider: vi.fn(), setWidget: vi.fn(), setStatus: vi.fn(), notify: vi.fn() } };
     for (const handler of sessionStartHandlers) {
       await handler({}, fakeNewCtx);
     }
@@ -436,6 +442,7 @@ describe("enterAgentMode", () => {
       activeAgent: "test-agent",
       displayName: "test-agent",
       parentSessionFile: "/session/parent",
+      systemPrompt: expect.stringContaining("You are a test agent"),
     });
   });
 });
@@ -469,6 +476,7 @@ describe("auto-apply default agent mode", () => {
     );
     expect(pi.setActiveTools).toHaveBeenCalled();
     expect(getAgentMode().activeAgent).toBe("default-agent");
+    expect(getAgentMode().systemPrompt).toBeDefined();
   });
 
   it("persists model and thinking in auto-applied config entry", async () => {
@@ -756,6 +764,68 @@ describe("agent-mode-off with auto-applied mode", () => {
   });
 });
 
+describe("before_agent_start handler", () => {
+  it("augments system prompt when agent mode is active", async () => {
+    setAgentMode({
+      activeAgent: "test-agent",
+      displayName: "Test",
+      systemPrompt: "You are a test agent.",
+    });
+
+    const pi = fakePiWithTools();
+    const beforeAgentStartHandlers: Array<(event: any, ctx: any) => Promise<any> | any> = [];
+    (pi as any).on = vi.fn((event: string, handler: any) => {
+      if (event === "before_agent_start") beforeAgentStartHandlers.push(handler);
+    });
+
+    registerAgentModeCommands(pi);
+
+    expect(beforeAgentStartHandlers.length).toBeGreaterThanOrEqual(1);
+
+    const event = { systemPrompt: "Base system prompt." };
+    const result = await beforeAgentStartHandlers[0](event, {});
+
+    expect(result).toBeDefined();
+    expect(result.systemPrompt).toContain("Base system prompt.");
+    expect(result.systemPrompt).toContain("You are a test agent.");
+    expect(result.systemPrompt).toContain("\n\n");
+  });
+
+  it("returns undefined when agent mode is inactive", async () => {
+    clearAgentMode();
+
+    const pi = fakePiWithTools();
+    const beforeAgentStartHandlers: Array<(event: any, ctx: any) => Promise<any> | any> = [];
+    (pi as any).on = vi.fn((event: string, handler: any) => {
+      if (event === "before_agent_start") beforeAgentStartHandlers.push(handler);
+    });
+
+    registerAgentModeCommands(pi);
+
+    const event = { systemPrompt: "Base system prompt." };
+    const result = await beforeAgentStartHandlers[0](event, {});
+
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when system prompt is missing from mode", async () => {
+    setAgentMode({ activeAgent: "test-agent", displayName: "Test" });
+
+    const pi = fakePiWithTools();
+    const beforeAgentStartHandlers: Array<(event: any, ctx: any) => Promise<any> | any> = [];
+    (pi as any).on = vi.fn((event: string, handler: any) => {
+      if (event === "before_agent_start") beforeAgentStartHandlers.push(handler);
+    });
+
+    registerAgentModeCommands(pi);
+
+    const event = { systemPrompt: "Base system prompt." };
+    const result = await beforeAgentStartHandlers[0](event, {});
+
+    expect(result).toBeUndefined();
+  });
+});
+
 describe("agent-mode resume rehydration", () => {
   function rehydratePi() {
     return {
@@ -766,6 +836,11 @@ describe("agent-mode resume rehydration", () => {
       appendEntry: vi.fn(),
       registerCommand: vi.fn(),
       getAllTools: vi.fn(() => []),
+      exec: vi.fn(async (_cmd: string, args: string[]) => {
+        if (args.includes("--is-inside-work-tree")) return { code: 0, stdout: "true\n", stderr: "", killed: false };
+        if (args.includes("--show-current")) return { code: 0, stdout: "main\n", stderr: "", killed: false };
+        return { code: 0, stdout: "", stderr: "", killed: false };
+      }),
     } as unknown as ExtensionAPI;
   }
 
@@ -778,6 +853,7 @@ describe("agent-mode resume rehydration", () => {
         ),
       },
       ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn(), addAutocompleteProvider: vi.fn() },
+      cwd: "/workspace",
     };
   }
 
@@ -810,7 +886,7 @@ describe("agent-mode resume rehydration", () => {
     }
   }
 
-  it("rehydrates state, model, tools, thinking on resume", async () => {
+  it("rehydrates state, model, tools, thinking, and system prompt on resume", async () => {
     const pi = rehydratePi();
     const ctx = rehydrateCtx([configEntry()]);
     await fireSessionStart(pi, ctx, "resume");
@@ -819,6 +895,7 @@ describe("agent-mode resume rehydration", () => {
       activeAgent: "worker",
       displayName: "Worker",
       parentSessionFile: "/session/parent",
+      systemPrompt: "prompt",
     });
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("agent-mode-status", "Agent: Worker");
     expect(pi.setModel).toHaveBeenCalledWith({ id: "sonnet", provider: "anthropic" });
@@ -845,6 +922,33 @@ describe("agent-mode resume rehydration", () => {
     ]);
     await fireSessionStart(pi, ctx, "resume");
     expect(getAgentMode().displayName).toBe("New");
+    expect(getAgentMode().systemPrompt).toBe("prompt");
+  });
+
+  it("restores system prompt from persisted entry on rehydration", async () => {
+    const pi = rehydratePi();
+    const persistedPrompt = "You are a rehydrated worker agent.";
+    const ctx = rehydrateCtx([configEntry({ systemPrompt: persistedPrompt })]);
+    await fireSessionStart(pi, ctx, "resume");
+
+    expect(getAgentMode().systemPrompt).toBe(persistedPrompt);
+  });
+
+  it("warns and continues when system prompt cannot be restored on rehydration", async () => {
+    const pi = rehydratePi();
+    const nonexistentEntry = configEntry({ agentName: "nonexistent-agent", systemPrompt: undefined });
+    const ctx = rehydrateCtx([nonexistentEntry]);
+
+    await fireSessionStart(pi, ctx, "resume");
+
+    expect(getAgentMode().activeAgent).toBe("nonexistent-agent");
+    expect(getAgentMode().systemPrompt).toBeUndefined();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "agent-mode-warning",
+      expect.objectContaining({
+        message: expect.stringContaining("Could not restore system prompt"),
+      }),
+    );
   });
 
   it("warns on unresolvable model but still applies tools and thinking", async () => {
@@ -873,6 +977,7 @@ describe("agent-mode resume rehydration", () => {
     const pi = rehydratePi();
     const ctx = rehydrateCtx([configEntry()]);
     await fireSessionStart(pi, ctx, "resume");
-    expect((pi as any).appendEntry).not.toHaveBeenCalledWith("agent-mode-instructions", expect.anything());
+    const appendCalls = (pi.appendEntry as any).mock.calls.filter((call: any[]) => call[0] === "agent-mode-instructions");
+    expect(appendCalls.length).toBe(0);
   });
 });
