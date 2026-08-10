@@ -39,7 +39,7 @@
 
 import type { Model } from "@mariozechner/pi-ai";
 import type { AutocompleteItem, AutocompleteProvider } from "@mariozechner/pi-tui";
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, SessionStartEvent } from "@mariozechner/pi-coding-agent";
 import { getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { detectEnv } from "./env.js";
 import { resolveModel } from "./model-resolver.js";
@@ -119,6 +119,61 @@ export function resolveAgentModeModel(
   const modelInput = config.model;
   if (!modelInput) return parentModel;
   return resolveModel(modelInput, registry as any);
+}
+
+/**
+ * Apply agent-mode to the current session in place (persistence + live apply).
+ * Used by auto-apply and as the setup/apply sequence for manual mode entry.
+ * Persists agent-mode-config and agent-mode-instructions entries, applies model/thinking/tools.
+ */
+async function applyAgentModeToSession(
+  pi: ExtensionAPI,
+  ctx: { sessionManager: { appendCustomEntry(type: string, data: any): void; appendCustomMessageEntry(type: string, content: any, display: boolean, role?: undefined): void }; cwd: string; modelRegistry?: any },
+  config: AgentConfig,
+): Promise<{ model: any; tools: string[] }> {
+  const displayName = config.displayName ?? config.name;
+  const systemPrompt = await buildAgentModePrompt(pi, config, ctx.cwd);
+
+  const modelOrError = config.model
+    ? resolveAgentModeModel(config, undefined, ctx.modelRegistry ?? {})
+    : undefined;
+  const resolvedModel = typeof modelOrError !== "string" && modelOrError ? modelOrError : undefined;
+  const tools = await resolveAgentModeTools(pi, config, pi);
+
+  // Persist to session log
+  ctx.sessionManager.appendCustomEntry("agent-mode-config", {
+    agentName: config.name,
+    displayName,
+    systemPrompt,
+    tools,
+  } as AgentModeEntryData);
+
+  ctx.sessionManager.appendCustomMessageEntry(
+    "agent-mode-instructions",
+    [{ type: "text", text: systemPrompt }],
+    false,
+    undefined,
+  );
+
+  // Apply live
+  if (resolvedModel) {
+    try {
+      await pi.setModel(resolvedModel);
+    } catch {
+      // Ignore — leave on whatever default model it started with
+    }
+  }
+  if (config.thinking) {
+    pi.setThinkingLevel(config.thinking);
+  }
+  if (tools) {
+    pi.setActiveTools(tools);
+  }
+
+  // Update module state (no parent session for auto-apply)
+  setAgentMode({ activeAgent: config.name, displayName });
+
+  return { model: resolvedModel, tools };
 }
 
 /**
@@ -307,7 +362,42 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
   // Applies a pending model/tools/thinking switch queued by enterAgentMode()
   // just before it called ctx.newSession(). Runs once per fresh instance,
   // using this instance's own (valid) pi, then clears the flag.
-  pi.on("session_start", async () => {
+  // Also auto-applies default agent mode on fresh new sessions if conditions allow.
+  pi.on("session_start", async (event: SessionStartEvent | undefined, ctx: any) => {
+    const isNewSession = event?.reason === "new" || event?.reason === "startup";
+    const skipReasons = new Set(["resume", "reload", "fork"]);
+    const shouldSkip = event && skipReasons.has(event.reason);
+
+    // Auto-apply: check conditions
+    if (isNewSession && !shouldSkip && !pendingApply) {
+      const entries = (ctx?.sessionManager?.getEntries?.() as any[]) ?? [];
+      const hasExistingConfig = entries.some((e: any) => e.type === "agent-mode-config");
+
+      if (!hasExistingConfig) {
+        // Find first enabled agent with defaultMode:true, alphabetically
+        const candidates = getAvailableTypes()
+          .map(name => ({ name, config: getAgentConfig(name) }))
+          .filter(({ config }) => config?.defaultMode === true)
+          .sort(({ name: a }, { name: b }) => a.localeCompare(b));
+
+        if (candidates.length > 0) {
+          const { config } = candidates[0];
+          if (config) {
+            try {
+              await applyAgentModeToSession(pi, ctx, config);
+              if (ctx?.ui?.notify) {
+                ctx.ui.notify(`Auto-applied agent mode: ${config.displayName ?? config.name}`, "info");
+              }
+            } catch (err) {
+              // Silently ignore auto-apply errors; session continues with normal defaults
+              console.error("agent-mode auto-apply failed:", err);
+            }
+          }
+        }
+      }
+    }
+
+    // Apply pending model/tools/thinking (from enterAgentMode)
     if (!pendingApply) return;
     const { model, tools, thinking } = pendingApply;
     pendingApply = undefined;
@@ -398,8 +488,16 @@ export function registerAgentModeCommands(pi: ExtensionAPI): void {
   pi.registerCommand("agent-mode-off", {
     description: "Switch back to the session you were in before agent-mode",
     handler: async (_args, ctx) => {
-      if (!currentMode.activeAgent || !currentMode.parentSessionFile) {
+      if (!currentMode.activeAgent) {
         ctx.ui.notify("Not currently in agent-mode.", "info");
+        return;
+      }
+      // If no parentSessionFile (e.g., auto-applied mode), just clear mode and notify
+      if (!currentMode.parentSessionFile) {
+        ctx.ui.setStatus("agent-mode-status", undefined);
+        ctx.ui.setWidget("agent-mode", undefined);
+        clearAgentMode();
+        ctx.ui.notify("Agent-mode cleared. Continuing in this session.", "info");
         return;
       }
       const target = currentMode.parentSessionFile;

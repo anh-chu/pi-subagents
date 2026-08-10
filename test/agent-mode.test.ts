@@ -29,6 +29,56 @@ const baseConfig = (overrides: Partial<AgentConfig>): AgentConfig => ({
   ...overrides,
 });
 
+function fakeSessionStartCtx(overrides: { entries?: any[]; notify?: boolean } = {}) {
+  return {
+    sessionManager: {
+      appendCustomEntry: vi.fn(),
+      appendCustomMessageEntry: vi.fn(),
+      getEntries: vi.fn(() => overrides.entries ?? []),
+    },
+    ui: {
+      notify: overrides.notify !== false ? vi.fn() : undefined,
+      setWidget: vi.fn(),
+      setStatus: vi.fn(),
+      addAutocompleteProvider: vi.fn(),
+    },
+    cwd: "/workspace",
+    modelRegistry: {
+      find: vi.fn((provider: string, modelId: string) => ({ id: modelId, provider })),
+      getAvailable: vi.fn(() => [{ id: "sonnet", provider: "anthropic", name: "Sonnet" }]),
+    },
+  };
+}
+
+function fakePiWithTools() {
+  const sessionStartHandlers: Array<(event: any, ctx: any) => Promise<void>> = [];
+  return {
+    exec: vi.fn(async (_cmd: string, args: string[]) => {
+      if (args.includes("--is-inside-work-tree")) return { code: 0, stdout: "true\n", stderr: "", killed: false };
+      if (args.includes("--show-current")) return { code: 0, stdout: "main\n", stderr: "", killed: false };
+      return { code: 0, stdout: "", stderr: "", killed: false };
+    }),
+    setModel: vi.fn(async () => true),
+    setThinkingLevel: vi.fn(),
+    setActiveTools: vi.fn(),
+    appendEntry: vi.fn(),
+    getAllTools: vi.fn(() => [
+      { name: "read" },
+      { name: "bash" },
+      { name: "edit" },
+    ]),
+    modelRegistry: {
+      find: vi.fn((provider: string, modelId: string) => ({ id: modelId, provider })),
+      getAvailable: vi.fn(() => [{ id: "sonnet", provider: "anthropic", name: "Sonnet" }]),
+    },
+    on: vi.fn((event: string, handler: (event: any, ctx: any) => Promise<void>) => {
+      if (event === "session_start") sessionStartHandlers.push(handler);
+    }),
+    registerCommand: vi.fn(),
+    _sessionStartHandlers: sessionStartHandlers,
+  } as unknown as ExtensionAPI;
+}
+
 describe("agent mode state", () => {
   it("starts empty", () => {
     const state = getAgentMode();
@@ -386,5 +436,266 @@ describe("enterAgentMode", () => {
       displayName: "test-agent",
       parentSessionFile: "/session/parent",
     });
+  });
+});
+
+describe("auto-apply default agent mode", () => {
+  it("applies default mode on reason:new with no existing config", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["default-agent", baseConfig({ name: "default-agent", defaultMode: true, displayName: "Default" })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    registerAgentModeCommands(pi);
+
+    // Simulate session_start with reason:new
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "new" }, ctx);
+    }
+
+    expect(ctx.sessionManager.appendCustomEntry).toHaveBeenCalledWith(
+      "agent-mode-config",
+      expect.objectContaining({ agentName: "default-agent" }),
+    );
+    expect(ctx.sessionManager.appendCustomMessageEntry).toHaveBeenCalledWith(
+      "agent-mode-instructions",
+      expect.arrayContaining([expect.objectContaining({ type: "text" })]),
+      false,
+      undefined,
+    );
+    expect(pi.setActiveTools).toHaveBeenCalled();
+    expect(getAgentMode().activeAgent).toBe("default-agent");
+  });
+
+  it("applies first alphabetically when multiple default agents exist", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["zebra-agent", baseConfig({ name: "zebra-agent", defaultMode: true })],
+      ["apple-agent", baseConfig({ name: "apple-agent", defaultMode: true })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    registerAgentModeCommands(pi);
+
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "new" }, ctx);
+    }
+
+    expect(ctx.sessionManager.appendCustomEntry).toHaveBeenCalledWith(
+      "agent-mode-config",
+      expect.objectContaining({ agentName: "apple-agent" }),
+    );
+    expect(getAgentMode().activeAgent).toBe("apple-agent");
+  });
+
+  it("skips auto-apply when reason is resume", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["default-agent", baseConfig({ name: "default-agent", defaultMode: true })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    registerAgentModeCommands(pi);
+
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "resume" }, ctx);
+    }
+
+    expect(ctx.sessionManager.appendCustomEntry).not.toHaveBeenCalled();
+    expect(getAgentMode().activeAgent).toBeUndefined();
+  });
+
+  it("skips auto-apply when reason is reload", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["default-agent", baseConfig({ name: "default-agent", defaultMode: true })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    registerAgentModeCommands(pi);
+
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "reload" }, ctx);
+    }
+
+    expect(ctx.sessionManager.appendCustomEntry).not.toHaveBeenCalled();
+    expect(getAgentMode().activeAgent).toBeUndefined();
+  });
+
+  it("skips auto-apply when agent-mode-config entry already present", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["default-agent", baseConfig({ name: "default-agent", defaultMode: true })],
+    ]);
+    registerAgents(userAgents);
+
+    const existingEntries = [
+      { type: "agent-mode-config", data: { agentName: "other-agent" } },
+    ];
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx({ entries: existingEntries });
+
+    registerAgentModeCommands(pi);
+
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "new" }, ctx);
+    }
+
+    // Should not append another config
+    expect(ctx.sessionManager.appendCustomEntry).not.toHaveBeenCalled();
+    expect(getAgentMode().activeAgent).toBeUndefined();
+  });
+
+  it("skips auto-apply when reason is fork", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["default-agent", baseConfig({ name: "default-agent", defaultMode: true })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    registerAgentModeCommands(pi);
+
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "fork" }, ctx);
+    }
+
+    expect(ctx.sessionManager.appendCustomEntry).not.toHaveBeenCalled();
+    expect(getAgentMode().activeAgent).toBeUndefined();
+  });
+
+  it("applies default mode on reason:startup with no existing config", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["default-agent", baseConfig({ name: "default-agent", defaultMode: true, displayName: "Default" })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    registerAgentModeCommands(pi);
+
+    // Simulate session_start with reason:startup
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "startup" }, ctx);
+    }
+
+    expect(ctx.sessionManager.appendCustomEntry).toHaveBeenCalledWith(
+      "agent-mode-config",
+      expect.objectContaining({ agentName: "default-agent" }),
+    );
+    expect(ctx.sessionManager.appendCustomMessageEntry).toHaveBeenCalledWith(
+      "agent-mode-instructions",
+      expect.arrayContaining([expect.objectContaining({ type: "text" })]),
+      false,
+      undefined,
+    );
+    expect(getAgentMode().activeAgent).toBe("default-agent");
+  });
+
+  it("skips auto-apply when pendingApply is set", async () => {
+    const userAgents = new Map<string, AgentConfig>([
+      ["default-agent", baseConfig({ name: "default-agent", defaultMode: true, model: "anthropic/sonnet", thinking: "high" })],
+    ]);
+    registerAgents(userAgents);
+
+    const pi = fakePiWithTools();
+    const ctx = fakeSessionStartCtx();
+
+    // Capture the /agent-mode command handler
+    let agentModeHandler: ((args: string, cmdCtx: any) => Promise<void>) | null = null;
+    (pi.registerCommand as any) = vi.fn((cmd: string, opts: any) => {
+      if (cmd === "agent-mode") {
+        agentModeHandler = opts.handler;
+      }
+    });
+
+    registerAgentModeCommands(pi);
+
+    // Simulate calling /agent-mode worker to set pendingApply
+    // Mock ctx.newSession to record that it was called
+    const mockCmdCtx: any = {
+      cwd: "/workspace",
+      ui: { confirm: vi.fn(async () => true), notify: vi.fn() },
+      sessionManager: {
+        getSessionFile: vi.fn(() => "parent.session"),
+        getEntries: vi.fn(() => []),
+        getSessionId: vi.fn(() => "session-id"),
+      },
+      modelRegistry: ctx.modelRegistry,
+      newSession: vi.fn(async () => ({
+        cancelled: false,
+        result: "new-session",
+      })),
+    };
+
+    // Call the /agent-mode command (this will set pendingApply and call ctx.newSession)
+    await agentModeHandler!("default-agent", mockCmdCtx);
+
+    // Now the new session's session_start runs with pendingApply set
+    // Reset the mock to track new calls
+    (ctx.sessionManager.appendCustomEntry as any).mockClear();
+    (pi.setModel as any).mockClear();
+    (pi.setActiveTools as any).mockClear();
+    (pi.setThinkingLevel as any).mockClear();
+
+    // Fire session_start in the new session context
+    for (const handler of (pi as any)._sessionStartHandlers) {
+      await handler({ reason: "new" }, ctx);
+    }
+
+    // Auto-apply should have been skipped (pendingApply consumed instead)
+    expect(ctx.sessionManager.appendCustomEntry).not.toHaveBeenCalled();
+    // But the pending apply should have been processed
+    expect(pi.setModel).toHaveBeenCalled();
+    expect(pi.setThinkingLevel).toHaveBeenCalledWith("high");
+    expect(pi.setActiveTools).toHaveBeenCalled();
+  });
+});
+
+describe("agent-mode-off with auto-applied mode", () => {
+  it("clears mode without parent session when auto-applied", async () => {
+    setAgentMode({ activeAgent: "default-agent", displayName: "Default" }); // no parentSessionFile
+
+    const pi = fakePiWithTools();
+    let agentModeOffHandler: ((args: string, cmdCtx: any) => Promise<void>) | null = null;
+    (pi.registerCommand as any) = vi.fn((cmd: string, opts: any) => {
+      if (cmd === "agent-mode-off") {
+        agentModeOffHandler = opts.handler;
+      }
+    });
+
+    registerAgentModeCommands(pi);
+
+    const ctx: any = {
+      ui: {
+        setStatus: vi.fn(),
+        setWidget: vi.fn(),
+        notify: vi.fn(),
+      },
+      switchSession: vi.fn(),
+    };
+
+    // Call the actual /agent-mode-off handler
+    expect(agentModeOffHandler).not.toBeNull();
+    await agentModeOffHandler!("", ctx);
+
+    expect(ctx.ui.setStatus).toHaveBeenCalledWith("agent-mode-status", undefined);
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith("agent-mode", undefined);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Agent-mode cleared"),
+      "info",
+    );
+    expect(ctx.switchSession).not.toHaveBeenCalled(); // Should not try to switch
+    expect(getAgentMode().activeAgent).toBeUndefined();
   });
 });

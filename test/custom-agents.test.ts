@@ -485,6 +485,41 @@ Bad isolation.`);
     expect(result.get("bad-isolation")!.isolation).toBeUndefined();
   });
 
+  it("parses default_mode: true", () => {
+    writeAgent("default-agent", `---
+description: Auto-apply agent
+default_mode: true
+---
+
+This agent auto-applies.`);
+
+    const result = loadCustomAgents(tmpDir);
+    expect(result.get("default-agent")!.defaultMode).toBe(true);
+  });
+
+  it("parses default_mode: false", () => {
+    writeAgent("non-default", `---
+description: Manual agent
+default_mode: false
+---
+
+This agent does not auto-apply.`);
+
+    const result = loadCustomAgents(tmpDir);
+    expect(result.get("non-default")!.defaultMode).toBe(false);
+  });
+
+  it("defaultMode defaults to undefined when omitted", () => {
+    writeAgent("normal-agent", `---
+description: Normal agent
+---
+
+No auto-apply.`);
+
+    const result = loadCustomAgents(tmpDir);
+    expect(result.get("normal-agent")!.defaultMode).toBeUndefined();
+  });
+
   it("honors PI_CODING_AGENT_DIR for global custom agent discovery", () => {
     const altAgentDir = mkdtempSync(join(tmpdir(), "pi-alt-agent-"));
     const originalEnv = process.env.PI_CODING_AGENT_DIR;
