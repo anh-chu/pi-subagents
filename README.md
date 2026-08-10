@@ -243,7 +243,7 @@ Launch a sub-agent to handle a task autonomously.
 | ------------------- | ------------ | -------- | ------------------- | ---------------------------------------------------------------------------------------------- |
 | `prompt`            | string       | ✓        | —                   | Task description for the agent (can be multi-sentence; detailed is better)                     |
 | `description`       | string       | ✓        | —                   | Short 3–5 word summary shown in UI and widgets                                                |
-| `subagent_type`     | string       | ✓        | —                   | Agent type: built-in or custom (e.g. `"Explore"`, `"worker"`, `"auditor"`)                    |
+| `subagent_type`     | string       | –        | general-purpose     | Agent type: built-in or custom (e.g. `"Explore"`, `"worker"`, `"auditor"`). Omit for bare general-purpose dispatch.                    |
 | `model`             | string       | –        | parent model        | Model ID or fuzzy name (e.g. `"anthropic/claude-opus"`, `"haiku"`, `"sonnet"`). Fuzzy names match available models. |
 | `thinking`          | string       | –        | inherit             | Extended thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`                    |
 | `max_turns`         | number       | –        | unlimited           | Max agentic turns before graceful shutdown. Omitted or ≥1 = that limit; must be ≥1 in tool input (0 valid only in settings/frontmatter). Agents get a "wrap up" warning at the limit. |
@@ -337,6 +337,211 @@ steer_subagent({ agent_id: "agent-xyz789", message: "Actually, focus only on the
 
 ---
 
+## Four-Dial Orchestration and Coordination
+
+pi-subagents follows a **four-dial model** for agent dispatch: treat each Agent call as independent tuning of four concerns: **brief** (prompt), **brain** (model + thinking), **powers** (agent type), and **knowledge** (skills cited in the brief, not a separate parameter).
+
+This decoupling clarifies the coordinator's role and enables lean, dynamic orchestration.
+
+### Optional `subagent_type`
+
+The `subagent_type` parameter is now **optional**. Omit it to dispatch a bare general-purpose agent with access to all available tools:
+
+```typescript
+// Explicit general-purpose (old style, still works)
+Agent({
+  subagent_type: "general-purpose",
+  description: "Analyze logs",
+  prompt: "Review the error logs and summarize recurring patterns",
+})
+
+// Implicit general-purpose (new style, same behavior)
+Agent({
+  description: "Analyze logs",
+  prompt: "Review the error logs and summarize recurring patterns",
+})
+```
+
+Both are identical. Omitting the type is cleaner for simple tasks that don't require a specialized agent profile.
+
+### Workflow Design: Sequential, Parallel, and Dispatch-Review-Iterate
+
+When orchestrating multi-agent work, structure it around three patterns:
+
+**Sequential:** One task depends on the previous output.
+```typescript
+const explore = await Agent({
+  subagent_type: "Explore",
+  description: "Understand auth flow",
+  prompt: "Find all authentication files and flow",
+  run_in_background: false,  // Wait for result
+})
+
+const plan = await Agent({
+  subagent_type: "Plan",
+  description: "Plan refactor",
+  prompt: `Based on these findings, design a plan:\n\n${explore}`,
+  run_in_background: false,
+})
+```
+
+**Parallel:** Independent tasks can run simultaneously.
+```typescript
+Agent({
+  subagent_type: "Explore",
+  description: "Find frontend auth",
+  prompt: "Search for auth components in src/ui",
+  files: ["src/ui"],
+  run_in_background: true,
+})
+
+Agent({
+  subagent_type: "Explore",
+  description: "Find backend auth",
+  prompt: "Search for auth handlers in src/api",
+  files: ["src/api"],
+  run_in_background: true,
+})
+
+// Gather results later with get_subagent_result
+```
+
+**Dispatch-Review-Iterate:** Send work out, review results, then iterate based on findings.
+```typescript
+// Dispatch implementation
+const impl = await Agent({
+  subagent_type: "worker",
+  description: "Implement refactor",
+  prompt: "Refactor auth as described in the plan",
+  files: ["src/auth.ts"],
+  run_in_background: false,
+})
+
+// Review the diff
+const review = await Agent({
+  subagent_type: "reviewer",
+  description: "Review implementation",
+  prompt: `Check this implementation for correctness and fit:\n\n${impl}`,
+  run_in_background: false,
+})
+
+// If review finds issues, iterate with a follow-up worker
+if (review.includes("issue")) {
+  await Agent({
+    subagent_type: "worker",
+    description: "Fix issues",
+    prompt: `Address these issues from the review:\n\n${review}`,
+    files: ["src/auth.ts"],
+    run_in_background: false,
+  })
+}
+```
+
+### Model Tier Routing: Workload-Based Guidance
+
+Choose models based on workload, not by vendor name. Use this tiered language:
+
+- **Cheap:** Extraction, search, fast reconnaissance, grunt work (e.g., Explore reading files, simple grep tasks).
+- **Mid:** Bounded implementation, planning, review with clear scope (e.g., worker implementing a small feature, Plan designing a refactor).
+- **Strongest available:** Ambiguous design decisions, high-stakes review, complex reasoning (e.g., orchestrator deciding workflow direction, reviewer on critical security code).
+
+Concrete model defaults for built-in agents are listed in the agent descriptions below (e.g., "Explore is preset to haiku"), but tier routing is workload-driven: dispatch the right agent type for your task, then optionally override the model if you need more or fewer resources.
+
+### Orchestrator Role: Active Supervision
+
+The **orchestrator** agent type is unique: it focuses on active supervision methodology, not just task execution.
+
+When using the orchestrator, follow this loop:
+
+1. **Dispatch** agents with complete, self-contained briefs. Set expectations for what success looks like.
+2. **Monitor** running background agents via periodic `get_subagent_result()` calls. Capture progress and blockers.
+3. **Steer** drift early using `steer_subagent()` when you discover new constraints or misunderstandings.
+4. **Review** work before accepting it. Dispatch a `reviewer` to verify diffs, not yourself.
+5. **Iterate** with follow-up workers on review findings. Never fire-and-forget.
+
+Example orchestrator loop:
+```typescript
+// Dispatch implementation
+const workerId = (await Agent({
+  subagent_type: "worker",
+  description: "Refactor module",
+  prompt: "Refactor src/auth.ts according to the plan...",
+  files: ["src/auth.ts"],
+  run_in_background: true,  // Background so we can monitor
+})).details.agentId
+
+// Monitor progress
+await new Promise(resolve => {
+  const checkLoop = setInterval(async () => {
+    const status = await get_subagent_result({ agent_id: workerId })
+    if (status.includes("still running")) {
+      console.log("Still working...")
+    } else {
+      clearInterval(checkLoop)
+      resolve(status)
+    }
+  }, 5000)  // Check every 5 seconds
+})
+
+// Review the result before accepting
+const review = await Agent({
+  subagent_type: "reviewer",
+  description: "Review refactor",
+  prompt: `Review this refactoring for correctness and fit...`,
+  run_in_background: false,
+})
+```
+
+For detailed coordination guidance, see `~/.pi/agent/AGENTS.md` (created on install). That file contains workflow examples, brief scaffolds, and skill reference patterns.
+
+### Brief Scaffold: Goal, Context, Scope, Acceptance, Return
+
+When writing agent prompts, use this optional scaffold to ensure complete, self-contained briefs:
+
+```
+Goal: [What outcome are you aiming for?]
+
+Context: [What is the current state? What have you already tried?]
+
+Scope: [What files or features are in scope? What is out of scope?]
+
+Acceptance: [How will you know success? What must be true?]
+
+Return: [What format should the output be in? What should the agent summarize?]
+```
+
+Example:
+```typescript
+Agent({
+  description: "Refactor auth",
+  prompt: `Goal: Move authentication logic from auth.ts to auth/index.ts and auth/providers.ts.
+
+Context: We discovered that auth.ts has grown to 800 lines and is hard to maintain. Explore findings show it mixes provider login, session management, and token refresh.
+
+Scope: Only src/auth.ts and its callers. Do not refactor test files or migrations. Keep the public API stable.
+
+Acceptance: All tests pass. Imports still resolve correctly. No new dependencies.
+
+Return: Summary of what you moved where, any API changes (if unavoidable), and a link to the PR or diff.`,
+})
+```
+
+### Skill References: Cite, Don't Parameter
+
+Instead of a separate "skills" or "context" parameter, cite the files and documents your agent needs inline in the brief:
+
+```typescript
+Agent({
+  subagent_type: "Plan",
+  description: "Plan refactor",
+  prompt: `Design a refactoring plan based on these findings:\n\n${exploreOutput}\n\nAlso review ARCHITECTURE.md for patterns and MIGRATION_GUIDE.md for any deprecations.`,
+})
+```
+
+This keeps briefs self-contained and explicit about dependencies.
+
+---
+
 ## Bundled Agent Types
 
 pi-subagents ships with seven built-in agent types, covering common workflow patterns. All inherit the parent's model by default (except Explore, which is locked to haiku).
@@ -411,14 +616,15 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 
 ### orchestrator
 
-**Role:** Delegation-only oversight — orchestrate work exclusively through subagents.
+**Role:** Active supervision: dispatch with complete briefs, monitor, steer, review, iterate.
 
 **Tools:** bash only  
 **Model:** anthropic/claude-fable-5 (fixed)  
 **Thinking:** low  
-**Prompt:** Standalone (delegation system prompt)  
+**Prompt:** Standalone (active supervision system prompt)  
 **Max turns:** 40  
-**Features:** No file modification tools. Dispatches all work to specialized subagents (Explore, worker, reviewer, etc.) and steers them. Does not inspect code itself — all facts come from subagent reports.  
+**Features:** No file modification tools. Dispatches all work to specialized subagents (Explore, worker, reviewer, etc.). Monitors via `get_subagent_result()`. Steers drift with `steer_subagent()`. Reviews work via reviewer dispatch (not direct inspection). Does not inspect code itself; all facts come from subagent reports.  
+**Active supervision loop:** (1) Dispatch with complete briefs and expectations, (2) Monitor progress via periodic status checks, (3) Steer blockers or misunderstandings, (4) Review results via reviewer dispatch, (5) Iterate with follow-up workers. Never fire-and-forget.  
 **Use when:** Orchestrating complex multi-step workflows with many independent units. Orchestrator plans, dispatches, oversees, and reviews via subagents, never doing direct work.
 
 **Comparison table:**
@@ -431,7 +637,7 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 | worker            | All 7           | Inherit parent  | No     | 2     | No      | —         | Code implementation                |
 | reviewer          | All 7 (ro)      | Inherit parent  | No     | 1     | No      | 30        | Code review & validation           |
 | oracle            | Read-only (5)   | Inherit parent  | No     | 1     | No      | 30        | Decision consistency advisor       |
-| orchestrator      | bash only       | claude-fable-5  | Yes    | 1     | No      | 40        | Delegation & orchestration         |
+| orchestrator      | bash only       | claude-fable-5  | Yes    | 1     | No      | 40        | Active supervision & orchestration  |
 
 **Managing defaults:**
 
@@ -1302,7 +1508,7 @@ Every project now starts with concurrency 16, grace 10, and default max-turns 50
 
 - `{{typeList}}` — Full agent type list (compact + full descriptions)
 - `{{compactTypeList}}` — Compact one-line agent type list
-- `{{guidelines}}` — LLM usage guidelines and best practices
+- `{{guidelines}}`: Deprecated; renders as empty (coordination guidance moved to AGENTS.md)
 - `{{agentDir}}` — Path to active agent directory (e.g., `~/.pi/agent`)
 - `{{scheduleGuideline}}` — Schedule parameter format documentation
 

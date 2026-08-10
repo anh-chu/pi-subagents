@@ -11,6 +11,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
@@ -34,7 +35,7 @@ import { buildRecoveryPrompt, CHECKPOINT_PROTOCOL, extractCheckpoint, SOFT_LIMIT
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { applyAndEmitLoaded, type SubagentsSettings, saveAndEmitChanged, type ToolDescriptionMode } from "./settings.js";
-import { type AgentConfig, type AgentInvocation, type AgentRecord, type JoinMode, type NotificationDetails, type SubagentType } from "./types.js";
+import { type AgentConfig, type AgentInvocation, type AgentRecord, type JoinMode, type NotificationDetails } from "./types.js";
 import {
   type AgentActivity,
   type AgentDetails,
@@ -504,11 +505,14 @@ export default function (pi: ExtensionAPI) {
   }
 
   // Capture ctx from session_start for RPC spawn handler + start the scheduler.
+  // Also re-register the Agent tool to pick up fresh model list from new session context.
   pi.on("session_start", async (_event, ctx) => {
     grindCounter.reset();
     currentCtx = ctx;
     manager.clearCompleted();
     if (isSchedulingEnabled() && !scheduler.isActive()) startScheduler(ctx);
+    // Re-register Agent tool to rebuild description with fresh model list from current session
+    registerAgentTool();
   });
 
   pi.on("session_before_switch", () => {
@@ -722,17 +726,47 @@ export default function (pi: ExtensionAPI) {
       return `- ${name}: ${firstSentence(cfg?.description ?? name)}${buildConfigTags(cfg)}`;
     }).join("\n");
 
-  /** Build routing guidelines dynamically from all available agent descriptions. */
-  const buildGuidelinesText = (): string => {
-    const availableSet = new Set(getAvailableTypes());
-    const allNames = [...getDefaultAgentNames(), ...getUserAgentNames()].filter((n) => availableSet.has(n));
-    const routingLines = allNames.map((name) => {
-      const cfg = getAgentConfig(name);
-      const desc = cfg?.description ?? name;
-      return `- Use ${name} for: ${desc.replace(/\.$/, "").toLowerCase()}`;
+  /** Build dynamic model catalog from available models in the current session. */
+  const buildModelListText = (): string => {
+    const models = currentCtx?.modelRegistry?.getAvailable?.();
+    if (!models || models.length === 0) {
+      return "(models not available; consult your pi configuration for available models)";
+    }
+    // Format each model as "provider/id" (or just id if no provider prefix)
+    const modelIds = models.map((m: any) => {
+      // Extract the model ID; format varies by model type, but usually has an 'id' property
+      return m.id || m.name || String(m);
     });
-    return routingLines.join("\n");
+    if (modelIds.length === 0) {
+      return "(no available models)";
+    }
+    // Include all models in the list; if >15, add a count note
+    const modelList = modelIds.join(", ");
+    if (modelIds.length > 15) {
+      return `${modelList} (${modelIds.length} total)`;
+    }
+    return modelList;
   };
+
+  /** Detect if pi-fabric is installed (check for package presence). */
+  const detectPiFabric = (): boolean => {
+    try {
+      // Use createRequire for ESM-compatible require.resolve
+      const resolve = createRequire(import.meta.url).resolve;
+      // Try correct name first, then legacy name for robustness
+      try {
+        resolve('pi-fabric');
+        return true;
+      } catch {
+        resolve('@earendil-works/pi-fabric');
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  };
+
+  const piFabricInstalled = detectPiFabric();
 
   // Apply persisted settings on startup and emit `subagents:settings_loaded`.
   // Global + project merged; missing → defaults; corrupt file emits a warning
@@ -775,46 +809,70 @@ export default function (pi: ExtensionAPI) {
     : "";
 
   // Full (default) Agent tool description — the rich, dynamic version.
-  const fullAgentToolDescription = `Launch a new agent to handle complex, multi-step tasks autonomously.
+  const buildFullAgentToolDescription = (): string => {
+    let desc = `Launch a new agent to handle complex, multi-step tasks autonomously.
 
 The Agent tool launches specialized agents that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
 
 Available agent types:
 ${buildTypeListText()}
 
-Guidelines:
-Agent selection — pick the most specific type for the task:
-${buildGuidelinesText()}
+Hard invariants:
+- Prompts must be self-contained; agents do not see parent conversation unless inherit_context is true.
+- Declare file ownership via files[] to detect overlaps and prevent clobbers.
+- Verify agent output before accepting as done; review diffs rather than trusting claims.
 
+Coordination:
 - For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.
-- Provide clear, detailed prompts so the agent can work autonomously.
-- Agent results are returned as text — summarize them for the user.
-- Use run_in_background for work you don't need immediately. You will be notified when it completes.
 - Use resume with an agent ID to continue a previous agent's work.
 - Use steer_subagent to send mid-run messages to a running background agent.
+- Coordinator loop: dispatch agents, read results, synthesize, then dispatch next agents informed by findings.
+- For large handoffs, tell an agent to write its report to outputFile param, then tell the next agent to read that file.${scheduleGuideline}
+
+Model and Thinking:
+- Available models: ${buildModelListText()}
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
-- Use thinking to control extended thinking level.
-- Use inherit_context if the agent needs the parent conversation history.
-- Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications).
-- You are the coordinator. Multi-step work is a loop: dispatch an agent, read its result, synthesize, then write the next agent's prompt. Never paste raw output — extract specific paths, facts, and directives.
-- Parallel work: launch agents in ONE message with run_in_background: true on each. Work is independent when agents edit disjoint files — imports between files are not coupling. Declare files: [...] to detect overlaps. Don't fan out trivial one-line changes.
-- For large handoffs, tell an agent to write its report to a file path (outputFile param), then tell the next agent to read that file.${scheduleGuideline}`;
+- Use thinking to control extended thinking level (off, minimal, low, medium, high, xhigh).
+- Workload-based model tier guidance: cheap for extraction and grunt work; mid for bounded implementation; strongest available for ambiguous design and high-stakes review.
+
+Isolation:
+- Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications).`;
+
+    if (piFabricInstalled) {
+      desc += `
+
+For long code-shaped workflows (dynamic chains, handovers between subagents, budgeted parallel fan-out, no per-step orchestrator token cost), prefer fabric_exec's agents/workflow API over repeated Agent calls. The Agent tool remains the right choice for judgment-driven conversational loops and observation-based iteration.`;
+    }
+
+    return desc;
+  };
 
   // Compact Agent tool description (`toolDescriptionMode: "compact"`) — the same
   // load-bearing facts at ~75% fewer tokens, for small/local models. Per-option
   // details live in the param descriptions.
-  const compactAgentToolDescription = `Launch an autonomous agent for complex, multi-step tasks. Agent types:
+  const buildCompactAgentToolDescription = (): string => {
+    let desc = `Launch an autonomous agent for complex, multi-step tasks. Agent types:
 ${buildCompactTypeListText()}
+
+Available models: ${buildModelListText()}
 
 Custom agents: .pi/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global).
 
 Notes:
 - description: 3-5 words (shown in UI). Prompts must be self-contained — the agent has not seen this conversation.
-- Parallel work: one message, multiple Agent calls, run_in_background: true on each. You are notified when background agents finish — never poll or sleep. Work is independent when agents edit disjoint files; don't fan out trivial changes.
-- Coordinator loop: dispatch agents, read results, synthesize, write next prompt. For handoffs, use the outputFile param so agents can read each other's output.
-- The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
+- Parallel work: one message, multiple Agent calls, run_in_background: true on each. Work is independent when agents edit disjoint files; don't fan out trivial changes.
+- Coordinator loop: dispatch agents, read results, synthesize, write next prompt. For handoffs, use outputFile param so agents can read each other's output.
+- Verify agent output before accepting; review diffs rather than trusting claims.
 - resume continues a previous agent by ID; steer_subagent messages a running one.
 - isolation: "worktree" runs the agent in an isolated git worktree; changes land on a branch.${scheduleGuideline}`;
+
+    if (piFabricInstalled) {
+      desc += `
+- For long code-shaped workflows, prefer fabric_exec's agents/workflow API.`;
+    }
+
+    return desc;
+  };
 
   // `toolDescriptionMode: "custom"` — user-authored description with live
   // dynamic parts. Project file wins over global; missing/empty falls back to
@@ -824,7 +882,8 @@ Notes:
     const vars: Record<string, () => string> = {
       typeList: buildTypeListText,
       compactTypeList: buildCompactTypeListText,
-      guidelines: buildGuidelinesText,
+      modelList: buildModelListText,
+      guidelines: () => "",  // Deprecated; renders as empty
       agentDir: getAgentDir,
       scheduleGuideline: () => scheduleGuideline,
     };
@@ -853,21 +912,25 @@ Notes:
     return undefined;
   };
 
-  const agentToolDescription = (() => {
+  // Function to get the current Agent tool description based on mode and context.
+  // Called at registration and re-registration (session_start) to pick up fresh model list.
+  const getAgentToolDescription = (): string => {
     const mode = getToolDescriptionMode();
-    if (mode === "compact") return compactAgentToolDescription;
+    if (mode === "compact") return buildCompactAgentToolDescription();
     if (mode === "custom") {
       const custom = loadCustomToolDescription();
       if (custom) return custom;
       console.warn('[pi-subagents] toolDescriptionMode is "custom" but no agent-tool-description.md found — using "full"');
     }
-    return fullAgentToolDescription;
-  })();
+    return buildFullAgentToolDescription();
+  };
 
-  pi.registerTool(defineTool({
+  // Register or re-register the Agent tool (called initially and at session_start for fresh descriptions).
+  const registerAgentTool = () => {
+    pi.registerTool(defineTool({
     name: "Agent",
     label: "Agent",
-    description: agentToolDescription,
+    description: getAgentToolDescription(),
     parameters: Type.Object({
       prompt: Type.String({
         description: "The task for the agent to perform.",
@@ -875,9 +938,11 @@ Notes:
       description: Type.String({
         description: "Short (3-5 word) task label for UI.",
       }),
-      subagent_type: Type.String({
-        description: `Agent type. Available: ${getAvailableTypes().join(", ")}. Custom: .pi/agents/*.md or ${getAgentDir()}/agents/*.md.`,
-      }),
+      subagent_type: Type.Optional(
+        Type.String({
+          description: `Agent type. Available: ${getAvailableTypes().join(", ")}. Custom: .pi/agents/*.md or ${getAgentDir()}/agents/*.md.`,
+        }),
+      ),
       model: Type.Optional(
         Type.String({
           description: '"provider/modelId" or fuzzy (e.g. "haiku", "sonnet"). Agents marked "locked" in the type list reject model overrides.',
@@ -1025,7 +1090,7 @@ Notes:
       // Reload custom agents so new .pi/agents/*.md files are picked up without restart
       reloadCustomAgents();
 
-      const rawType = params.subagent_type as SubagentType;
+      const rawType = (params.subagent_type ?? "general-purpose") as string;
 
       // Classify before any side-effect work (schedule/model/output/agent setup).
       const availability = getAgentAvailability(rawType);
@@ -1398,6 +1463,10 @@ Notes:
       );
     },
   }));
+  };
+
+  // Initial registration and session_start re-registration for fresh model list
+  registerAgentTool();
 
   // ---- get_subagent_result tool ----
 
@@ -1457,7 +1526,50 @@ Notes:
         `Description: ${record.description}\n\n`;
 
       if (record.status === "running") {
-        output += "Agent is still running. Use wait: true or check back later.";
+        output += "Agent is still running.\n\n";
+        
+        // For running agents, show recent tool activity and partial output tail
+        if (record.session) {
+          // Extract recent tool calls (last 3-5)
+          const toolCalls: Array<{ name: string; args?: Record<string, unknown> }> = [];
+          for (const msg of record.session.messages) {
+            if (msg.role === "assistant") {
+              for (const content of msg.content) {
+                if (content.type === "toolCall" && (content as any).name) {
+                  toolCalls.push({
+                    name: (content as any).name,
+                    args: (content as any).input || (content as any).params,
+                  });
+                }
+              }
+            }
+          }
+          
+          if (toolCalls.length > 0) {
+            const recentToolCalls = toolCalls.slice(-5);
+            output += "Recent tool activity (last ~5 calls):\n";
+            for (const call of recentToolCalls) {
+              let argsStr = "";
+              if (call.args) {
+                if (typeof call.args === "object") {
+                  const argKeys = Object.keys(call.args).slice(0, 2);
+                  argsStr = argKeys.length > 0 ? ` (${argKeys.join(", ")})` : "";
+                }
+              }
+              output += `- ${call.name}${argsStr}\n`;
+            }
+            output += "\n";
+          }
+          
+          const conversation = getAgentConversation(record.session);
+          if (conversation) {
+            const outputLines = conversation.split("\n");
+            const tailLines = outputLines.slice(-15);  // Last 10-15 lines
+            output += "Recent output (last ~15 lines):\n";
+            output += tailLines.join("\n");
+          }
+        }
+        output += "\n\nUse wait: true to wait for completion, or check back later.";
       } else if (record.status === "error") {
         output += `Error: ${record.error}`;
       } else {

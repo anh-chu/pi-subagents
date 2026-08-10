@@ -43,15 +43,15 @@ describe("buildAgentPrompt", () => {
   it("Explore prompt is read-only", () => {
     const config = getDefaultConfig("Explore");
     const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("file search specialist");
+    expect(prompt).toContain("Read-only file and content search specialist");
+    expect(prompt).toContain("Does NOT create, modify, or delete files");
   });
 
   it("Plan prompt is read-only", () => {
     const config = getDefaultConfig("Plan");
     const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("software architect");
+    expect(prompt).toContain("Read-only mode");
+    expect(prompt).toContain("Multi-Step Implementation Strategy");
   });
 
   it("general-purpose uses append mode (parent twin)", () => {
@@ -61,7 +61,7 @@ describe("buildAgentPrompt", () => {
     expect(prompt).toContain("parent coding agent with full powers");
     expect(prompt).toContain("<sub_agent_context>");
     expect(prompt).toContain("<inherited_system_prompt>");
-    expect(prompt).not.toContain("READ-ONLY");
+    expect(prompt).not.toContain("Read-only");
     // Empty systemPrompt means no <agent_instructions> section
     expect(prompt).not.toContain("<agent_instructions>");
   });
@@ -70,7 +70,7 @@ describe("buildAgentPrompt", () => {
     const config = getDefaultConfig("general-purpose");
     const prompt = buildAgentPrompt(config, "/workspace", env);
     expect(prompt).toContain("general-purpose coding agent");
-    expect(prompt).not.toContain("READ-ONLY");
+    expect(prompt).not.toContain("Read-only");
   });
 
   it("append mode with parent prompt includes parent + custom instructions", () => {

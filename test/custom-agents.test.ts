@@ -42,7 +42,7 @@ max_turns: 30
 prompt_mode: replace
 inherit_context: true
 run_in_background: true
-isolated: true
+isolation: "worktree"
 ---
 
 You are a security auditor.`);
@@ -60,7 +60,7 @@ You are a security auditor.`);
     expect(agent.promptMode).toBe("replace");
     expect(agent.inheritContext).toBe(true);
     expect(agent.runInBackground).toBe(true);
-    expect(agent.isolated).toBe(true);
+    expect(agent.isolation).toBe("worktree");
     expect(agent.systemPrompt).toBe("You are a security auditor.");
   });
 
@@ -86,7 +86,7 @@ Just a prompt.`);
     expect(agent.promptMode).toBe("replace");
     expect(agent.inheritContext).toBeUndefined();
     expect(agent.runInBackground).toBeUndefined();
-    expect(agent.isolated).toBeUndefined();
+    expect(agent.isolation).toBeUndefined();
     expect(agent.systemPrompt).toBe("Just a prompt.");
   });
 

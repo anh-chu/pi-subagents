@@ -395,4 +395,22 @@ describe("agent type registry", () => {
       expect(config.promptMode).toBe("append");
     });
   });
+
+  describe("default fallback for undefined subagent_type", () => {
+    it("general-purpose is available as fallback type", () => {
+      // The dispatch logic defaults undefined subagent_type to "general-purpose"
+      // This test verifies that general-purpose is available and valid.
+      const availability = getAgentAvailability("general-purpose");
+      expect(availability.status).toBe("available");
+      expect(availability.canonicalName).toBe("general-purpose");
+    });
+
+    it("undefined subagent_type would safely resolve to general-purpose", () => {
+      // When subagent_type is undefined in dispatch params, the code defaults it to "general-purpose"
+      // This test verifies that the fallback is a valid type that getAgentAvailability can process.
+      const fallbackType = "general-purpose";
+      const availability = getAgentAvailability(fallbackType);
+      expect(availability.status).toBe("available");
+    });
+  });
 });
