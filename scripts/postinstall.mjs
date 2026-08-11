@@ -6,7 +6,10 @@
  * 
  * Guards:
  *   - Exits 0 (no write) if process.env.CI is set (CI environment).
- *   - Exits 0 (no write) if INIT_CWD resolves to the package's own directory (dev install).
+ *   - Exits 0 (no write) if INIT_CWD resolves to the package's own directory (dev install)
+ *     AND the package directory is not under ~/.pi/agent (pi git-extension installs run
+ *     npm with cwd inside the cloned package dir, so INIT_CWD equality alone is not
+ *     sufficient to detect a dev checkout).
  * 
  * Best-effort:
  *   - Any fs error logs a warning to stderr and exits 0 (install continues).
@@ -15,7 +18,8 @@
  * See scripts/agents-md-block.mjs for core logic.
  */
 
-import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   atomicWriteAgentsMd,
@@ -33,9 +37,15 @@ if (process.env.CI) {
   process.exit(0);
 }
 
-// Guard: skip if dev install (INIT_CWD resolves to package's own directory)
+// Guard: skip if dev install (INIT_CWD resolves to package's own directory).
+// Exception: pi installs git extensions with cwd inside the cloned package dir
+// (under ~/.pi/agent), so INIT_CWD === packageDir there too. Only treat it as a
+// dev checkout when the package dir is NOT under the pi agent directory.
+const piAgentDir = resolve(join(homedir(), ".pi", "agent"));
+const underPiAgentDir =
+  packageDir === piAgentDir || packageDir.startsWith(piAgentDir + sep);
 const initCwd = process.env.INIT_CWD ? resolve(process.env.INIT_CWD) : null;
-if (initCwd && initCwd === packageDir) {
+if (initCwd && initCwd === packageDir && !underPiAgentDir) {
   process.exit(0);
 }
 

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { promises as fs, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, promises as fs, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -382,6 +382,23 @@ describe("postinstall and preuninstall behavior", () => {
       // File should not exist
       const content = await readAgentsMd(agentsMdPath);
       expect(content).toBe("");
+    });
+
+    it("writes when INIT_CWD is package directory but package lives under ~/.pi/agent (pi git install)", async () => {
+      // Simulate a pi git-extension install: package cloned under ~/.pi/agent,
+      // npm run with cwd inside the cloned package dir (INIT_CWD === packageDir).
+      const installedPkgDir = join(tmpDir, ".pi", "agent", "git", "github.com", "anh-chu", "pi-subagents");
+      mkdirSync(installedPkgDir, { recursive: true });
+      cpSync(join(packageDir, "scripts"), join(installedPkgDir, "scripts"), { recursive: true });
+
+      const env = { ...process.env, INIT_CWD: installedPkgDir, HOME: tmpDir };
+      delete env.CI;
+      const result = spawnSync("node", [join(installedPkgDir, "scripts", "postinstall.mjs")], { env, stdio: "pipe" });
+      expect(result.status).toBe(0);
+
+      const content = await readAgentsMd(agentsMdPath);
+      expect(content).toContain(BEGIN_MARKER);
+      expect(content).toContain("Four-Dial");
     });
 
     it("creates AGENTS.md on fresh install (normal case)", async () => {
