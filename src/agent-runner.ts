@@ -515,7 +515,7 @@ export async function runAgent(
     noSkills,
     noPromptTemplates: true,
     noThemes: true,
-    noContextFiles: true,
+    noContextFiles: agentConfig?.promptMode === "replace",
     systemPromptOverride: () => systemPrompt,
     appendSystemPromptOverride: () => [],
   });

@@ -19,6 +19,23 @@ export interface BuildAgentPromptOptions {
 }
 
 /**
+ * Strip <project_instructions> blocks from a system prompt to avoid duplication.
+ * Used when embedding a parent's system prompt in append-mode agents, since the
+ * loader will append fresh project_instructions when noContextFiles is false.
+ *
+ * @param prompt The prompt to clean.
+ * @returns The prompt with <project_instructions>...</project_instructions> blocks removed.
+ */
+function stripProjectInstructions(prompt: string): string {
+  // Remove <project_instructions path="...">...</project_instructions> blocks
+  // and collapse multiple consecutive newlines
+  return prompt
+    .replace(/<project_instructions(?:\s[^>]*)?>([\s\S]*?)<\/project_instructions>/g, '')
+    .replace(/\n\n\n+/g, '\n\n')
+    .trim();
+}
+
+/**
  * Build the system prompt for an agent from its config.
  *
  * - "replace" mode: env header + config.systemPrompt (full control, no parent identity)
@@ -73,7 +90,9 @@ Platform: ${env.platform}`;
     }
 
     // Default "spawn" context: include inherited system prompt and sub-agent context bridge.
-    const identity = parentSystemPrompt || genericBase;
+    // Strip project_instructions blocks from parent prompt since loader will append them fresh
+    // (noContextFiles is false for append mode, so loader supplies fresh AGENTS.md).
+    const identity = parentSystemPrompt ? stripProjectInstructions(parentSystemPrompt) : genericBase;
 
     const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.

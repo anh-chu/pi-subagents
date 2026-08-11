@@ -490,5 +490,89 @@ describe("buildAgentPrompt", () => {
         expect(tagIndex).toBeLessThan(envIndex);
       }
     });
+
+    it("strips project_instructions blocks from parent prompt in append mode", () => {
+      const parentWithProjectInstructions = `You are the parent agent.
+
+<project_instructions path=".pi/agents/AGENTS.md">
+# Available Agents
+Some agent definitions.
+</project_instructions>
+
+Other parent context.`;
+
+      const config: AgentConfig = {
+        name: "child-agent",
+        description: "Child",
+        builtinToolNames: [],
+        extensions: true,
+        skills: true,
+        systemPrompt: "Child instructions.",
+        promptMode: "append",
+        inheritContext: false,
+        runInBackground: false,
+        isolated: false,
+      };
+
+      const prompt = buildAgentPrompt(config, "/workspace", env, parentWithProjectInstructions);
+
+      // Verify project_instructions block is not in the inherited_system_prompt section
+      expect(prompt).not.toContain("<project_instructions");
+      expect(prompt).not.toContain("Available Agents");
+      expect(prompt).toContain("You are the parent agent.");
+      expect(prompt).toContain("Other parent context.");
+      expect(prompt).toContain("<inherited_system_prompt>");
+      expect(prompt).toContain("<sub_agent_context>");
+    });
+
+    it("strips multiple project_instructions blocks and preserves similar-named tags", () => {
+      const parentWithMultipleBlocks = `Start.
+
+<project_instructions path=".pi/agents/AGENTS.md">
+# Block 1
+Content 1.
+</project_instructions>
+
+Middle text.
+
+<project_instructions path=".pi/agents/skills.md">
+# Block 2
+Content 2.
+</project_instructions>
+
+<project_instructions_backup>
+Backup content should remain.
+</project_instructions_backup>
+
+End.`;
+
+      const config: AgentConfig = {
+        name: "child-agent",
+        description: "Child",
+        builtinToolNames: [],
+        extensions: true,
+        skills: true,
+        systemPrompt: "Child instructions.",
+        promptMode: "append",
+        inheritContext: false,
+        runInBackground: false,
+        isolated: false,
+      };
+
+      const prompt = buildAgentPrompt(config, "/workspace", env, parentWithMultipleBlocks);
+
+      // Verify both project_instructions blocks are stripped
+      expect(prompt).not.toContain("Block 1");
+      expect(prompt).not.toContain("Block 2");
+      expect(prompt).not.toContain("Content 1");
+      expect(prompt).not.toContain("Content 2");
+      // Verify similar-named tag is preserved
+      expect(prompt).toContain("<project_instructions_backup>");
+      expect(prompt).toContain("Backup content should remain.");
+      // Verify surrounding text remains
+      expect(prompt).toContain("Start.");
+      expect(prompt).toContain("Middle text.");
+      expect(prompt).toContain("End.");
+    });
   });
 });
