@@ -11,7 +11,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
@@ -750,20 +749,17 @@ export default function (pi: ExtensionAPI) {
 
   /** Detect if pi-fabric is installed (check for package presence). */
   const detectPiFabric = (): boolean => {
+    // pi-fabric's exports map has no "require" condition, so require.resolve
+    // throws ERR_PACKAGE_PATH_NOT_EXPORTED even when installed. Check
+    // import.meta.resolve (import condition) first, then the global pi
+    // extension install dir (covers this extension running from a dev path).
     try {
-      // Use createRequire for ESM-compatible require.resolve
-      const resolve = createRequire(import.meta.url).resolve;
-      // Try correct name first, then legacy name for robustness
-      try {
-        resolve('pi-fabric');
-        return true;
-      } catch {
-        resolve('@earendil-works/pi-fabric');
-        return true;
-      }
+      import.meta.resolve('pi-fabric');
+      return true;
     } catch {
-      return false;
+      // fall through
     }
+    return existsSync(join(getAgentDir(), 'npm', 'node_modules', 'pi-fabric'));
   };
 
   const piFabricInstalled = detectPiFabric();

@@ -41,10 +41,10 @@ describe("Reviewer defects - regression tests", () => {
       const indexPath = join(import.meta.dirname || ".", "..", "src", "index.ts");
       const content = readFileSync(indexPath, "utf-8");
 
-      // Should try 'pi-fabric' first
-      expect(content).toContain("resolve('pi-fabric')");
-      // Should fallback to legacy name as robustness measure
-      expect(content).toContain("'@earendil-works/pi-fabric'");
+      // Should resolve via ESM import condition (exports map has no "require" condition)
+      expect(content).toContain("import.meta.resolve('pi-fabric')");
+      // Should fall back to checking the global pi extension install dir
+      expect(content).toContain("join(getAgentDir(), 'npm', 'node_modules', 'pi-fabric')");
     });
   });
 
