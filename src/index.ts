@@ -1594,54 +1594,68 @@ Notes:
     },
   }));
 
+  // ---- steering (shared by steer_subagent tool, /agents menu, /steer command) ----
+
+  /**
+   * Send a steering message to a running agent by id. Handles the not-found /
+   * not-running guards, queues on pendingSteers when the session isn't ready
+   * yet, and emits the `subagents:steered` event. Returns a human-readable
+   * result string; `ok` indicates whether the steer was delivered or queued.
+   */
+  async function steerAgentById(id: string, message: string): Promise<{ ok: boolean; text: string }> {
+    const record = manager.getRecord(id);
+    if (!record) {
+      return { ok: false, text: `Agent not found: "${id}". It may have been cleaned up.` };
+    }
+    if (record.status !== "running" && record.status !== "queued") {
+      return { ok: false, text: `Agent "${id}" is not running or queued (status: ${record.status}). Cannot steer a non-running agent.` };
+    }
+    if (!record.session) {
+      // Session not ready yet — queue the steer for delivery once initialized
+      if (!record.pendingSteers) record.pendingSteers = [];
+      record.pendingSteers.push(message);
+      pi.events.emit("subagents:steered", { id: record.id, message });
+      return { ok: true, text: `Steering message queued for agent ${record.id}. It will be delivered once the session initializes.` };
+    }
+
+    try {
+      await steerAgent(record.session, message);
+      pi.events.emit("subagents:steered", { id: record.id, message });
+      const tokens = formatLifetimeTokens(record);
+      const contextPercent = getSessionContextPercent(record.session);
+      const stateParts: string[] = [];
+      if (tokens) stateParts.push(tokens);
+      stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
+      if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
+      if (record.compactionCount) stateParts.push(`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`);
+      return {
+        ok: true,
+        text: `Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
+          `Current state: ${stateParts.join(" · ")}`,
+      };
+    } catch (err) {
+      return { ok: false, text: `Failed to steer agent: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
   // ---- steer_subagent tool ----
 
   pi.registerTool(defineTool({
     name: "steer_subagent",
     label: "Steer Agent",
     description:
-      "Send a steering message to a running agent. Interrupts after current tool execution.",
+      "Send a steering message to a running or queued agent. Interrupts after current tool execution.",
     parameters: Type.Object({
       agent_id: Type.String({
-        description: "Agent ID (must be running).",
+        description: "Agent ID (must be running or queued).",
       }),
       message: Type.String({
         description: "Message injected as user message in agent's conversation.",
       }),
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-      const record = manager.getRecord(params.agent_id);
-      if (!record) {
-        return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
-      }
-      if (record.status !== "running") {
-        return textResult(`Agent "${params.agent_id}" is not running (status: ${record.status}). Cannot steer a non-running agent.`);
-      }
-      if (!record.session) {
-        // Session not ready yet — queue the steer for delivery once initialized
-        if (!record.pendingSteers) record.pendingSteers = [];
-        record.pendingSteers.push(params.message);
-        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
-        return textResult(`Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`);
-      }
-
-      try {
-        await steerAgent(record.session, params.message);
-        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
-        const tokens = formatLifetimeTokens(record);
-        const contextPercent = getSessionContextPercent(record.session);
-        const stateParts: string[] = [];
-        if (tokens) stateParts.push(tokens);
-        stateParts.push(`${record.toolUses} tool ${record.toolUses === 1 ? "use" : "uses"}`);
-        if (contextPercent !== null) stateParts.push(`context ${Math.round(contextPercent)}% full`);
-        if (record.compactionCount) stateParts.push(`${record.compactionCount} compaction${record.compactionCount === 1 ? "" : "s"}`);
-        return textResult(
-          `Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
-          `Current state: ${stateParts.join(" · ")}`,
-        );
-      } catch (err) {
-        return textResult(`Failed to steer agent: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      const result = await steerAgentById(params.agent_id, params.message);
+      return textResult(result.text);
     },
   }));
 
@@ -1810,9 +1824,14 @@ Notes:
     if (isStoppable) {
       const action = await ctx.ui.select(
         `${record.description}`,
-        ["View conversation", "Stop agent", "Back"],
+        ["View conversation", "Steer (send message)", "Stop agent", "Back"],
       );
       if (!action || action === "Back") {
+        await showRunningAgents(ctx);
+        return;
+      }
+      if (action === "Steer (send message)") {
+        await promptAndSteer(ctx, record);
         await showRunningAgents(ctx);
         return;
       }
@@ -1833,6 +1852,19 @@ Notes:
     await viewAgentConversation(ctx, record);
     // Back-navigation: re-show the list
     await showRunningAgents(ctx);
+  }
+
+  /** Prompt the user for a steering message and deliver it to the agent. */
+  async function promptAndSteer(ctx: ExtensionCommandContext, record: AgentRecord) {
+    const message = await ctx.ui.editor(`Steer ${record.id} (${record.description})`);
+    if (message === undefined) return; // escape
+    const trimmed = message.trim();
+    if (trimmed.length === 0) {
+      ctx.ui.notify("Empty message — steer cancelled.", "info");
+      return;
+    }
+    const result = await steerAgentById(record.id, trimmed);
+    ctx.ui.notify(result.text, result.ok ? "info" : "error");
   }
 
   async function viewAgentConversation(ctx: ExtensionCommandContext, record: AgentRecord) {
@@ -2588,6 +2620,27 @@ ${systemPrompt}
   pi.registerCommand("agents", {
     description: "Manage agents",
     handler: async (_args, ctx) => { await showAgentsMenu(ctx); },
+  });
+
+  pi.registerCommand("steer", {
+    description: "Send a steering message to a running agent",
+    handler: async (_args, ctx) => {
+      const candidates = manager.listAgents().filter(a => a.status === "running" || a.status === "queued");
+      if (candidates.length === 0) {
+        ctx.ui.notify("No running agents.", "info");
+        return;
+      }
+      let record = candidates[0];
+      if (candidates.length > 1) {
+        const options = candidates.map(a => `${a.id} · ${getDisplayName(a.type)} · ${a.description}`);
+        const choice = await ctx.ui.select("Steer which agent?", options);
+        if (!choice) return;
+        const idx = options.indexOf(choice);
+        if (idx < 0) return;
+        record = candidates[idx];
+      }
+      await promptAndSteer(ctx, record);
+    },
   });
 
   pi.registerCommand("grind-status", {
