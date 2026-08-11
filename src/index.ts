@@ -837,7 +837,7 @@ Isolation:
     if (piFabricInstalled) {
       desc += `
 
-For long code-shaped workflows (dynamic chains, handovers between subagents, budgeted parallel fan-out, no per-step orchestrator token cost), prefer fabric_exec's agents/workflow API over repeated Agent calls. The Agent tool remains the right choice for judgment-driven conversational loops and observation-based iteration.`;
+For long code-shaped workflows (dynamic chains, handovers between subagents, budgeted parallel fan-out, no per-step orchestrator token cost), prefer fabric_exec's agents/workflow API over repeated Agent calls. The Agent tool remains the right choice for judgment-driven conversational loops and observation-based iteration. Pattern vocabulary and adaptable examples: load the fabric-workflows skill before authoring.`;
     }
 
     return desc;
@@ -864,7 +864,7 @@ Notes:
 
     if (piFabricInstalled) {
       desc += `
-- For long code-shaped workflows, prefer fabric_exec's agents/workflow API.`;
+- For code-shaped multi-agent workflows, prefer fabric_exec; see fabric-workflows skill.`;
     }
 
     return desc;
