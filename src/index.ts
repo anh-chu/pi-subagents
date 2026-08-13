@@ -831,6 +831,7 @@ Coordination:
 - Use resume with an agent ID to continue a previous agent's work.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Coordinator loop: dispatch agents, read results, synthesize, then dispatch next agents informed by findings.
+- Delegate work whose intermediate output you need only the conclusion of; keep work inline when you must reason over the raw output. Never delegate understanding, and stop doing a workstream yourself once you delegate it.
 - For large handoffs, tell an agent to write its report to outputFile param, then tell the next agent to read that file.${scheduleGuideline}
 
 Model and Thinking:
@@ -866,6 +867,7 @@ Notes:
 - description: 3-5 words (shown in UI). Prompts must be self-contained — the agent has not seen this conversation.
 - Parallel work: one message, multiple Agent calls, run_in_background: true on each. Work is independent when agents edit disjoint files; don't fan out trivial changes.
 - Coordinator loop: dispatch agents, read results, synthesize, write next prompt. For handoffs, use outputFile param so agents can read each other's output.
+- Delegate disposable output (work you need only the conclusion of); keep inline what you must reason over. Understand results before the next dispatch; don't re-do delegated work.
 - Verify agent output before accepting; review diffs rather than trusting claims.
 - resume continues a previous agent by ID; steer_subagent messages a running one.
 - isolation: "worktree" runs the agent in an isolated git worktree; changes land on a branch.${scheduleGuideline}`;

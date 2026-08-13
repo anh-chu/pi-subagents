@@ -437,6 +437,16 @@ if (review.includes("issue")) {
 }
 ```
 
+### Delegation Criterion: Context Economics
+
+Choose inline-vs-delegate by what your context needs, not by task size:
+
+- Delegate work whose intermediate output (searches, reads, edits, test runs) you will not reason over again. You only need its conclusion.
+- Keep work inline when you must think with the raw output.
+- Multi-file or long work usually delegates because it generates disposable debris, not because it is large. A directed lookup with a known target stays inline even if it touches several files.
+- **Never delegate understanding.** Understand a result before dispatching the next concrete step. Avoid "based on your findings, fix it" handoffs; state the diagnosis and the specific change.
+- **Do not double-work.** Once you delegate a workstream, stop running the same searches or edits yourself.
+
 ### Model Tier Routing: Workload-Based Guidance
 
 Choose models based on workload, not by vendor name. Use this tiered language:

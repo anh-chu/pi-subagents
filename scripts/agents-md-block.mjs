@@ -70,6 +70,18 @@ For each dispatch, choose between:
 - **Built-in templates**: Use a preset agent type (Explore for read-only search, worker for trusted implementation).
 - **Custom agents**: Define agent types in .pi/agents/*.md for domain-specific presets.
 
+## Delegation Criterion: Context Economics
+
+Decide inline-vs-delegate by what your context needs, not by task size:
+
+- Delegate work whose intermediate output (searches, reads, edits, test runs) you will not reason over again — you only need its conclusion.
+- Keep work inline when you must think with the raw output.
+- Multi-file or long work usually delegates because it generates disposable debris, not because it is "big". A directed lookup with a known target stays inline even if it touches several files.
+
+**Never delegate understanding.** Understand a result before dispatching the next concrete step. Avoid "based on your findings, fix it" handoffs; state the diagnosis and the specific change instead.
+
+**Do not double-work.** Once you delegate a workstream, stop running the same searches or edits yourself. Spend coordinator context on synthesis and the next decision.
+
 ## Routing Principle: Workload-Based Tier Language
 
 Select agents by workload tier, not vendor or model name:
