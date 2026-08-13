@@ -53,10 +53,13 @@ When dispatching a subagent, tailor four independent dimensions:
 
 Choose the coordination pattern that fits your task:
 
-- **Sequential**: Dispatch to one agent, await result, decide next step (observation-driven iteration).
+- **Default to \`run_in_background: true\`.** Dispatch all independent, file-disjoint agents in one message, then collect results.
+- **Block on a single agent only when the next dispatch genuinely depends on its result.** Dispatching one agent, waiting, then dispatching an unrelated one is an error.
+
+- **Sequential**: Dependency-ordered background dispatches. Dispatch one agent in the background, collect its result, then decide and dispatch the next step (observation-driven iteration).
   Use when the next step depends on the previous outcome.
 
-- **Parallel fan-out**: Dispatch multiple agents with independent briefs, await all results.
+- **Parallel fan-out**: Dispatch multiple background agents with independent briefs in one message, then collect all results.
   Use when subtasks are truly independent (e.g., search multiple code patterns in parallel).
 
 - **Dispatch-Review-Iterate**: Dispatch an agent, review their work, send follow-up instructions or dispatch a different agent to refine.
