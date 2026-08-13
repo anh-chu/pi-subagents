@@ -703,7 +703,7 @@ All fields are optional. Sensible defaults apply to everything.
 | `display_name`       | string                  | —              | Custom display name for UI (widget, agent list, agent-mode commands)                                                                                 |
 | `tools`              | string (comma-separated) | all 7          | Tools this agent can access. Built-in: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`. `none` for no tools. `*` / `all` expands to all built-ins. `ext:foo` / `ext:foo/bar` for extension tools. `ext:*` for all extension tools. |
 | `extensions` / `inherit_extensions` | boolean \| string[] | omitted | Extensions to load: `true` (all), `false` (none), or array of names/paths/package sources. Omitted = use global `defaultExtensions`, then all. Names are case-insensitive. **Package source selectors** (e.g., `npm:@scope/package`, `git:https://github.com/org/repo.git`) match exact package sources; supported prefixes: `npm:`, `git:`, `github:`, `http:`, `https:`, `ssh:`. Both field names accepted (alias). |
-| `skills` / `inherit_skills` | boolean \| string[] | true | Inherit parent skills (`true`), no skills (`false`), or list specific skill names to preload from `.pi/skills/`. Both names accepted (alias). |
+| `skills` / `inherit_skills` | boolean \| string[] | omitted | Inherit parent skills (`true`), no skills (`false`), or list specific skill names to preload from `.pi/skills/`. Omitted = use global `defaultSkills`, then `true` (inherit all). Both names accepted (alias). |
 | `disallowed_tools`   | string (comma-separated) | —              | Tools to deny even if extensions provide them (e.g., `write, edit`)                                                                                   |
 | `memory`             | `project` \| `local` \| `user` | —              | Persistent memory scope. Auto-detects read-only agents for safety (read-only memory mode).                                                          |
 | `isolation`          | `worktree`              | —              | Run in isolated git worktree (safe concurrent edits, branches auto-created)                                                                           |
@@ -736,11 +736,20 @@ You can use the GitHub search tool and read files.
 ```
 
 **State precedence:**
-1. Agent frontmatter `extensions:` list (if specified)
+1. Agent frontmatter `extensions:` list (if specified, including `false`)
 2. Global `defaultExtensions` setting (if omitted)
 3. All discovered extensions (if both omitted)
 
+**`forcedExtensions` overrides this ladder:** the forced array always loads, even when frontmatter sets `extensions: false`. Global + project `forcedExtensions` arrays **union** (dedup, order-preserving); a project cannot erase a globally-forced extension. Forced entries flow through the same fail-fast guard as regular selectors (a forced name that doesn't resolve to a discovered extension or loadable path throws at spawn).
+
 Package source selectors match exact sources; use `npm:`, `git:`, `github:`, `http:`, `https:`, or `ssh:` prefix. Names and paths (with `/` or `~`) are also supported in the same array.
+
+**State precedence:**
+1. Agent frontmatter `skills:` list (if specified, including `false`)
+2. Global `defaultSkills` setting (if omitted)
+3. Inherit all parent skills (`true`) (if both omitted)
+
+**`forcedSkills` overrides this ladder:** the forced array always preloads, even when frontmatter sets `skills: false`. Global + project `forcedSkills` arrays **union** (dedup by skill name, order-preserving); a project cannot erase a globally-forced skill. Entries are skill names from `.pi/skills/`.
 
 ### System Prompt Guidelines
 
@@ -1478,6 +1487,11 @@ Settings persist across pi sessions and are merged from two sources:
 | `disableDefaultAgents`  | boolean                  | false    | Skip all bundled agents (general-purpose, Explore, Plan, worker, reviewer, oracle, orchestrator)              |
 | `toolDescriptionMode`   | `"full"` \| `"compact"` \| `"custom"` | `"compact"` | LLM description of Agent tool                          |
 | `defaultExtensions`     | boolean \| string[]      | omitted  | Default extension allowlist for agents that omit `extensions:` field        |
+| `defaultSkills`         | boolean \| string[]      | omitted  | Default skills for agents that omit `skills:`. Omitted here too = inherit all (`true`).                                             |
+| `forcedExtensions`      | string[]                 | omitted  | Extensions every agent always loads, **ignoring per-agent `extensions: false`**. Global + project arrays **union** (dedup, order-preserving); project cannot erase global forced.             |
+| `forcedSkills`          | string[]                 | omitted  | Skills every agent always preloads, **ignoring per-agent `skills: false`**. Same union semantics as `forcedExtensions` (canonical dedup after load). Entries are skill names (not paths).  |
+
+**Mental model:** `default*` controls what an agent gets when its frontmatter omits the field. `forced*` controls what every agent always gets regardless of frontmatter (force wins, even on explicit `false`).
 
 **Example — global defaults for a powerful machine:**
 
@@ -1491,6 +1505,29 @@ cat > ~/.pi/agent/subagents.json <<'EOF'
 }
 EOF
 ```
+
+**Example — force a security skill and a coding-standards skill on every agent, even read-only ones:**
+
+```bash
+cat > ~/.pi/agent/subagents.json <<'EOF'
+{
+  "forcedSkills": ["security-review", "coding-standards"]
+}
+EOF
+```
+
+A project can add its own forced skills without erasing the global set:
+
+```bash
+cat > .pi/subagents.json <<'EOF'
+{
+  "forcedSkills": ["project-conventions"]
+}
+EOF
+```
+Every agent spawned in that project now preloads `security-review`, `coding-standards`, and `project-conventions`.
+
+**Breaking change for custom agents:** previously, omitting `skills:` in frontmatter meant "inherit all" (`true`). Now omitted `skills:` falls through to global `defaultSkills` (then `true` if that's also unset). Update custom agents that relied on omitted-means-true to use `skills: true` explicitly, or set `defaultSkills: true` globally to preserve the old behavior.
 
 Every project now starts with concurrency 16, grace 10, and default max-turns 50, without touching the menu. Project settings via `/agents` override these globally.
 

@@ -38,8 +38,9 @@
  */
 
 import type { Model } from "@mariozechner/pi-ai";
-import type { AutocompleteItem, AutocompleteProvider } from "@mariozechner/pi-tui";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { AutocompleteItem, AutocompleteProvider } from "@mariozechner/pi-tui";
+import { getDefaultSkills, getForcedSkills } from "./agent-runner.js";
 import { getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { detectEnv } from "./env.js";
 import { resolveModel } from "./model-resolver.js";
@@ -113,10 +114,26 @@ export async function buildAgentModePrompt(
   cwd: string,
 ): Promise<string> {
   const env = await detectEnv(pi, cwd);
+  // Mirror the subagent spawn resolution: base skills (frontmatter > defaultSkills
+  // > config > true) + forced skills appended on top, deduped by name.
+  const baseSkills = config.skills ?? getDefaultSkills() ?? true;
+  const forcedSkillList = getForcedSkills() ?? [];
+  const preloaded: { name: string; content: string }[] = [];
+  if (Array.isArray(baseSkills)) {
+    preloaded.push(...preloadSkills(baseSkills, cwd));
+  }
+  if (forcedSkillList.length > 0) {
+    const forced = preloadSkills(forcedSkillList, cwd);
+    const seen = new Set(preloaded.map((s) => s.name));
+    for (const s of forced) {
+      if (!seen.has(s.name)) {
+        seen.add(s.name);
+        preloaded.push(s);
+      }
+    }
+  }
   return buildAgentPrompt(config, cwd, env, undefined, {
-    skillBlocks: Array.isArray(config.skills)
-      ? preloadSkills(config.skills, cwd)
-      : undefined,
+    skillBlocks: preloaded.length > 0 ? preloaded : undefined,
   }, {
     context: "agent-mode",
   });

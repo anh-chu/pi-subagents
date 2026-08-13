@@ -8,7 +8,7 @@ describe("Reviewer defects - regression tests", () => {
       const readmePath = join(import.meta.dirname || ".", "..", "README.md");
       const content = readFileSync(readmePath, "utf-8");
       const lines = content.split("\n");
-      const line1511 = lines[1510]; // 0-indexed (line numbers are 1-indexed, so 1511-1 = 1510)
+      const line1511 = lines[1547]; // 0-indexed (line numbers are 1-indexed, so 1548-1 = 1547)
 
       // Should not have em dash (—)
       expect(line1511).not.toContain("—");

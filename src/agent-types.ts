@@ -154,7 +154,7 @@ export function getConfig(type: string): {
   description: string;
   builtinToolNames: string[];
   extensions: true | string[] | false;
-  skills: true | string[] | false;
+  skills: true | string[] | false | undefined;
   promptMode: "replace" | "append";
 } {
   const key = resolveKey(type);

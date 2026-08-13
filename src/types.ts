@@ -34,8 +34,9 @@ export interface AgentConfig {
   /** true = inherit all, string[] = only listed, false = none, undefined = omitted
    * (fall back to the global `defaultExtensions` setting, else all). */
   extensions: true | string[] | false | undefined;
-  /** true = inherit all, string[] = only listed, false = none */
-  skills: true | string[] | false;
+  /** true = inherit all, string[] = only listed, false = none, undefined = omitted
+   * (fall back to the global `defaultSkills` setting, else the built-in default). */
+  skills: true | string[] | false | undefined;
   model?: string;
   thinking?: ThinkingLevel;
   maxTurns?: number;

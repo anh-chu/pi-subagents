@@ -52,6 +52,27 @@ export interface SubagentsSettings {
    * Omitted here → agents that omit the field load all extensions (legacy default).
    */
   defaultExtensions?: true | string[] | false;
+  /**
+   * Like `defaultExtensions` but for `skills:`. Used when an agent's frontmatter
+   * omits `skills:`. Explicit per-agent `skills:` (incl. `false`) wins.
+   * Omitted here → agents that omit the field load all skills (legacy default).
+   */
+  defaultSkills?: true | string[] | false;
+  /**
+   * Forced extensions always loaded on top of the agent's resolved set, even
+   * when the agent's frontmatter explicitly says `extensions: false`. Array of
+   * extension names/paths (same entry shape as `defaultExtensions` list entries).
+   * Applied additively after base resolution; deduped by canonical form.
+   * Global + project arrays UNION across settings layers (forced accumulates).
+   */
+  forcedExtensions?: string[];
+  /**
+   * Forced skills always preloaded on top of the agent's resolved skills, even
+   * when the agent's frontmatter explicitly says `skills: false`. Array of
+   * skill names. Applied additively after base resolution; deduped by name.
+   * Global + project arrays UNION across settings layers (forced accumulates).
+   */
+  forcedSkills?: string[];
 }
 
 export type ToolDescriptionMode = "full" | "compact" | "custom";
@@ -66,6 +87,9 @@ export interface SettingsAppliers {
   setDisableDefaultAgents: (b: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setDefaultExtensions: (v: true | string[] | false) => void;
+  setDefaultSkills: (v: true | string[] | false) => void;
+  setForcedExtensions: (v: string[] | undefined) => void;
+  setForcedSkills: (v: string[] | undefined) => void;
 }
 
 /** Emit callback — a subset of `pi.events.emit` to keep helpers testable. */
@@ -119,15 +143,51 @@ function sanitize(raw: unknown): SubagentsSettings {
   if (typeof r.toolDescriptionMode === "string" && VALID_TOOL_DESCRIPTION_MODES.has(r.toolDescriptionMode)) {
     out.toolDescriptionMode = r.toolDescriptionMode as ToolDescriptionMode;
   }
-  // defaultExtensions mirrors the per-agent `extensions:` shape: boolean, or a
-  // list of non-empty strings (names/paths). Anything else is dropped.
+  // defaultExtensions/defaultSkills mirror the per-agent `extensions:`/`skills:` shape:
+  // boolean, or a list of non-empty strings (names/paths). Anything else is dropped.
   if (typeof r.defaultExtensions === "boolean") {
     out.defaultExtensions = r.defaultExtensions;
   } else if (Array.isArray(r.defaultExtensions)) {
     const list = r.defaultExtensions.filter((e): e is string => typeof e === "string" && e.trim().length > 0);
     if (list.length > 0) out.defaultExtensions = list;
   }
+  if (typeof r.defaultSkills === "boolean") {
+    out.defaultSkills = r.defaultSkills;
+  } else if (Array.isArray(r.defaultSkills)) {
+    const list = r.defaultSkills.filter((e): e is string => typeof e === "string" && e.trim().length > 0);
+    if (list.length > 0) out.defaultSkills = list;
+  }
+  // forced* are string[]-only (no boolean/false form). Arrays of non-empty strings.
+  out.forcedExtensions = sanitizeForcedArray(r.forcedExtensions);
+  out.forcedSkills = sanitizeForcedArray(r.forcedSkills);
   return out;
+}
+
+/** Sanitize a forced* array: keep only non-empty trimmed strings; drop empty arrays. */
+function sanitizeForcedArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list: string[] = [];
+  for (const e of raw) {
+    if (typeof e === "string") {
+      const t = e.trim();
+      if (t.length > 0) list.push(t);
+    }
+  }
+  return list.length > 0 ? list : undefined;
+}
+
+/** Union two string arrays preserving insertion order, de-duping exact duplicates. */
+function unionStrings(a: string[] | undefined, b: string[] | undefined): string[] | undefined {
+  if (!a?.length && !b?.length) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of [...(a ?? []), ...(b ?? [])]) {
+    if (!seen.has(s)) {
+      seen.add(s);
+      out.push(s);
+    }
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function globalPath(): string {
@@ -154,9 +214,19 @@ function readSettingsFile(path: string): SubagentsSettings {
   }
 }
 
-/** Load merged settings: global provides defaults, project overrides. */
+/** Load merged settings: scalar keys are project-overrides-global; `forced*`
+ * arrays UNION across layers (forced accumulates, never silently erased).
+ */
 export function loadSettings(cwd: string = process.cwd()): SubagentsSettings {
-  return { ...readSettingsFile(globalPath()), ...readSettingsFile(projectPath(cwd)) };
+  const global = readSettingsFile(globalPath());
+  const project = readSettingsFile(projectPath(cwd));
+  const merged: SubagentsSettings = { ...global, ...project };
+  // forced* union across global+project (forced means forced across settings layers too)
+  const forcedExt = unionStrings(global.forcedExtensions, project.forcedExtensions);
+  if (forcedExt) merged.forcedExtensions = forcedExt;
+  const forcedSkl = unionStrings(global.forcedSkills, project.forcedSkills);
+  if (forcedSkl) merged.forcedSkills = forcedSkl;
+  return merged;
 }
 
 /**
@@ -185,6 +255,9 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   if (typeof s.disableDefaultAgents === "boolean") appliers.setDisableDefaultAgents(s.disableDefaultAgents);
   if (s.toolDescriptionMode) appliers.setToolDescriptionMode(s.toolDescriptionMode);
   if (s.defaultExtensions !== undefined) appliers.setDefaultExtensions(s.defaultExtensions);
+  if (s.defaultSkills !== undefined) appliers.setDefaultSkills(s.defaultSkills);
+  if (s.forcedExtensions !== undefined) appliers.setForcedExtensions(s.forcedExtensions);
+  if (s.forcedSkills !== undefined) appliers.setForcedSkills(s.forcedSkills);
 }
 
 /**

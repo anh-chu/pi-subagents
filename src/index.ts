@@ -19,7 +19,7 @@ import { differsFromDefault, diffFromDefault } from "./agent-diff.js";
 import { revertFieldToDefault } from "./agent-field-revert.js";
 import { AgentManager } from "./agent-manager.js";
 import { registerAgentModeCommands } from "./agent-mode.js";
-import { agentDepth, getAgentConversation, getDefaultExtensions, getDefaultMaxTurns, getGraceTurns, normalizeMaxTurns, setDefaultExtensions, setDefaultMaxTurns, setGraceTurns, steerAgent } from "./agent-runner.js";
+import { agentDepth, getAgentConversation, getDefaultExtensions, getDefaultMaxTurns, getDefaultSkills, getForcedExtensions, getForcedSkills, getGraceTurns, normalizeMaxTurns, setDefaultExtensions, setDefaultMaxTurns, setDefaultSkills, setForcedExtensions, setForcedSkills, setGraceTurns, steerAgent } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentAvailability, getAgentConfig, getAllTypes, getAvailableTypes, getDefaultAgentNames, getUserAgentNames, isDefaultsDisabled, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
@@ -777,6 +777,9 @@ export default function (pi: ExtensionAPI) {
       setDisableDefaultAgents,
       setToolDescriptionMode,
       setDefaultExtensions,
+      setDefaultSkills,
+      setForcedExtensions,
+      setForcedSkills,
     },
     (event, payload) => pi.events.emit(event, payload),
   );
@@ -2440,6 +2443,9 @@ ${systemPrompt}
       disableDefaultAgents: isDefaultsDisabled(),
       toolDescriptionMode: getToolDescriptionMode(),
       ...(getDefaultExtensions() !== undefined ? { defaultExtensions: getDefaultExtensions() } : {}),
+      ...(getDefaultSkills() !== undefined ? { defaultSkills: getDefaultSkills() } : {}),
+      ...(getForcedExtensions() !== undefined ? { forcedExtensions: getForcedExtensions() } : {}),
+      ...(getForcedSkills() !== undefined ? { forcedSkills: getForcedSkills() } : {}),
     };
   }
 

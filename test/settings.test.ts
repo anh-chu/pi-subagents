@@ -122,6 +122,68 @@ describe("settings persistence", () => {
     expect(loadSettings(projectDir)).toEqual({});
   });
 
+  it("round-trips defaultSkills (mirrors defaultExtensions shape)", () => {
+    saveSettings({ defaultSkills: false }, projectDir);
+    expect(loadSettings(projectDir)).toEqual({ defaultSkills: false });
+    saveSettings({ defaultSkills: true }, projectDir);
+    expect(loadSettings(projectDir)).toEqual({ defaultSkills: true });
+    saveSettings({ defaultSkills: ["s1", "s2"] }, projectDir);
+    expect(loadSettings(projectDir)).toEqual({ defaultSkills: ["s1", "s2"] });
+    // empty/whitespace entries are dropped; an all-empty list is dropped entirely
+    writeProject({ defaultSkills: ["", "  ", 3] } as any);
+    expect(loadSettings(projectDir)).toEqual({});
+    writeProject({ defaultSkills: "s1" } as any);
+    expect(loadSettings(projectDir)).toEqual({});
+  });
+
+  it("round-trips forcedExtensions/forcedSkills: string arrays, drops junk", () => {
+    saveSettings({ forcedExtensions: ["foo", "bar"] }, projectDir);
+    expect(loadSettings(projectDir)).toEqual({ forcedExtensions: ["foo", "bar"] });
+    saveSettings({ forcedSkills: ["s1", "s2"] }, projectDir);
+    expect(loadSettings(projectDir)).toEqual({ forcedSkills: ["s1", "s2"] });
+    // empty/whitespace entries dropped; all-empty → undefined
+    writeProject({ forcedExtensions: ["", "  ", 3] } as any);
+    expect(loadSettings(projectDir).forcedExtensions).toBeUndefined();
+    writeProject({ forcedSkills: ["", "  ", 3] } as any);
+    expect(loadSettings(projectDir).forcedSkills).toBeUndefined();
+    // non-array values are dropped
+    writeProject({ forcedExtensions: "foo" } as any);
+    expect(loadSettings(projectDir).forcedExtensions).toBeUndefined();
+    writeProject({ forcedSkills: true } as any);
+    expect(loadSettings(projectDir).forcedSkills).toBeUndefined();
+    writeProject({ forcedExtensions: false } as any);
+    expect(loadSettings(projectDir).forcedExtensions).toBeUndefined();
+  });
+
+  it("forced* arrays UNION across global + project (forced accumulates)", () => {
+    writeGlobal({ forcedSkills: ["security", "audit"] });
+    writeProject({ forcedSkills: ["project-conventions"] });
+    const loaded = loadSettings(projectDir);
+    expect(loaded.forcedSkills).toEqual(["security", "audit", "project-conventions"]);
+  });
+
+  it("forced* dedupes exact duplicates across global + project", () => {
+    writeGlobal({ forcedExtensions: ["foo", "bar"] });
+    writeProject({ forcedExtensions: ["bar", "baz"] });
+    const loaded = loadSettings(projectDir);
+    expect(loaded.forcedExtensions).toEqual(["foo", "bar", "baz"]);
+  });
+
+  it("project forced*=[] does not erase global forced* (union keeps global)", () => {
+    writeGlobal({ forcedSkills: ["security"] });
+    writeProject({ forcedSkills: [] });
+    // an empty project array is dropped by sanitize, so union keeps global
+    const loaded = loadSettings(projectDir);
+    expect(loaded.forcedSkills).toEqual(["security"]);
+  });
+
+  it("default* stays project-overrides-global (no union)", () => {
+    writeGlobal({ defaultSkills: ["global-a"] });
+    writeProject({ defaultSkills: ["project-b"] });
+    const loaded = loadSettings(projectDir);
+    expect(loaded.defaultSkills).toEqual(["project-b"]); // project wins, no union
+  });
+
   it("round-trips schedulingEnabled (true and false), and absence stays absent", () => {
     saveSettings({ schedulingEnabled: false }, projectDir);
     expect(loadSettings(projectDir)).toEqual({ schedulingEnabled: false });
@@ -326,6 +388,9 @@ describe("settings persistence", () => {
         setDisableDefaultAgents: vi.fn(),
         setToolDescriptionMode: vi.fn(),
         setDefaultExtensions: vi.fn(),
+        setDefaultSkills: vi.fn(),
+        setForcedExtensions: vi.fn(),
+        setForcedSkills: vi.fn(),
       };
     });
 
@@ -404,6 +469,33 @@ describe("settings persistence", () => {
       expect(appliers.setDefaultExtensions).not.toHaveBeenCalled();
     });
 
+    it("calls setDefaultSkills for boolean and list values, including false", () => {
+      applySettings({ defaultSkills: false }, appliers);
+      expect(appliers.setDefaultSkills).toHaveBeenCalledWith(false);
+      applySettings({ defaultSkills: true }, appliers);
+      expect(appliers.setDefaultSkills).toHaveBeenCalledWith(true);
+      applySettings({ defaultSkills: ["s1"] }, appliers);
+      expect(appliers.setDefaultSkills).toHaveBeenCalledWith(["s1"]);
+    });
+
+    it("does not call setDefaultSkills when the field is absent", () => {
+      applySettings({ maxConcurrent: 2 }, appliers);
+      expect(appliers.setDefaultSkills).not.toHaveBeenCalled();
+    });
+
+    it("calls setForcedExtensions/setForcedSkills with the persisted array", () => {
+      applySettings({ forcedExtensions: ["foo"] }, appliers);
+      expect(appliers.setForcedExtensions).toHaveBeenCalledWith(["foo"]);
+      applySettings({ forcedSkills: ["bar"] }, appliers);
+      expect(appliers.setForcedSkills).toHaveBeenCalledWith(["bar"]);
+    });
+
+    it("does not call setForcedExtensions/setForcedSkills when the field is absent", () => {
+      applySettings({ maxConcurrent: 2 }, appliers);
+      expect(appliers.setForcedExtensions).not.toHaveBeenCalled();
+      expect(appliers.setForcedSkills).not.toHaveBeenCalled();
+    });
+
     it("does not call setToolDescriptionMode when the field is absent", () => {
       applySettings({ maxConcurrent: 2 }, appliers);
       expect(appliers.setToolDescriptionMode).not.toHaveBeenCalled();
@@ -457,6 +549,9 @@ describe("settings persistence", () => {
         setDisableDefaultAgents: vi.fn(),
         setToolDescriptionMode: vi.fn(),
         setDefaultExtensions: vi.fn(),
+        setDefaultSkills: vi.fn(),
+        setForcedExtensions: vi.fn(),
+        setForcedSkills: vi.fn(),
       };
     });
 

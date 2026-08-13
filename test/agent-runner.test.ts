@@ -113,7 +113,7 @@ vi.mock("../src/skill-loader.js", () => ({
   preloadSkills: vi.fn(() => []),
 }));
 
-import { extensionCanonicalName, forwardAbortSignal, getDefaultExtensions, parseExtensionsSpec, parseExtSelectors, resumeAgent, runAgent, setDefaultExtensions } from "../src/agent-runner.js";
+import { extensionCanonicalName, forwardAbortSignal, getDefaultExtensions, getDefaultSkills, getForcedExtensions, getForcedSkills, parseExtensionsSpec, parseExtSelectors, resumeAgent, runAgent, setDefaultExtensions, setDefaultSkills, setForcedExtensions, setForcedSkills } from "../src/agent-runner.js";
 import { getAgentConfig as mockedGetAgentConfig, getConfig as mockedGetConfig } from "../src/agent-types.js";
 import { detectEnv } from "../src/env.js";
 
@@ -886,5 +886,151 @@ describe("cancellation correctness", () => {
 
     expect(disposeSpy).toHaveBeenCalledOnce();
     expect(session.prompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("global defaultSkills / forced* resolution", () => {
+  const getAgentConfigMock = mockedGetAgentConfig as unknown as ReturnType<typeof vi.fn>;
+  const getConfigMock = mockedGetConfig as unknown as ReturnType<typeof vi.fn>;
+  const defaultAgentConfig = () => ({
+    name: "Explore", description: "Explore", builtinToolNames: ["read"],
+    extensions: false, skills: false, systemPrompt: "You are Explore.", promptMode: "replace",
+    inheritContext: false, runInBackground: false, isolated: false,
+  });
+  const defaultConfig = () => ({
+    displayName: "Explore", description: "Explore", builtinToolNames: ["read"],
+    extensions: false, skills: false, promptMode: "replace",
+  });
+  afterEach(() => {
+    setDefaultExtensions(undefined);
+    setDefaultSkills(undefined);
+    setForcedExtensions(undefined);
+    setForcedSkills(undefined);
+    getAgentConfigMock.mockImplementation(defaultAgentConfig);
+    getConfigMock.mockImplementation(defaultConfig);
+  });
+
+  it("omitted per-agent skills falls back to global defaultSkills (false → noSkills)", async () => {
+    getAgentConfigMock.mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: false, skills: undefined, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    getConfigMock.mockReturnValue(defaultConfig());
+    setDefaultSkills(false);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+    await runAgent(ctx, "Explore", "go", { pi });
+    expect(defaultResourceLoaderCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ noSkills: true }),
+    );
+  });
+
+  it("omitted per-agent skills with no global default loads skills (noSkills false)", async () => {
+    getAgentConfigMock.mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: false, skills: undefined, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    getConfigMock.mockReturnValue({
+      displayName: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: false, skills: true, promptMode: "replace",
+    });
+    setDefaultSkills(undefined);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+    await runAgent(ctx, "Explore", "go", { pi });
+    expect(defaultResourceLoaderCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ noSkills: false }),
+    );
+  });
+
+  it("explicit per-agent skills: false wins over global defaultSkills: true", async () => {
+    getAgentConfigMock.mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: false, skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    getConfigMock.mockReturnValue(defaultConfig());
+    setDefaultSkills(true);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+    await runAgent(ctx, "Explore", "go", { pi });
+    expect(defaultResourceLoaderCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ noSkills: true }),
+    );
+  });
+
+  it("forcedExtensions flips noExtensions off even when agent extensions===false", async () => {
+    // Seed a discovered extension with canonical name "some-ext" so the
+    // fail-fast unloaded-name guard does not trip on the forced entry.
+    mockLoadedExtensionsRef.value = [{ path: "/tmp/some-ext/index.ts", tools: new Map() }];
+    getAgentConfigMock.mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: false, skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    getConfigMock.mockReturnValue(defaultConfig());
+    setForcedExtensions(["some-ext"]);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+    await runAgent(ctx, "Explore", "go", { pi });
+    expect(defaultResourceLoaderCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ noExtensions: false }),
+    );
+  });
+
+  it("forcedExtensions unions path entries into additionalExtensionPaths", async () => {
+    getAgentConfigMock.mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: false, skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    getConfigMock.mockReturnValue(defaultConfig());
+    setForcedExtensions(["./forced-ext/index.ts"]);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+    await runAgent(ctx, "Explore", "go", { pi });
+    const opts = defaultResourceLoaderCtor.mock.calls.at(-1)![0];
+    expect(opts.noExtensions).toBe(false);
+    // resolve() normalizes the `.` — expected path is the normalized form.
+    expect(opts.additionalExtensionPaths).toContain("/tmp/forced-ext/index.ts");
+  });
+
+  it("forcedExtensions keeps named entry in the override keepset when base is a list", async () => {
+    // Set up a discovered extension with canonical name "keep";
+    mockLoadedExtensionsRef.value = [
+      { path: "/tmp/keep/index.ts", tools: new Map() },
+      { path: "/tmp/drop/index.ts", tools: new Map() },
+    ];
+    getAgentConfigMock.mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: ["keep"], skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    getConfigMock.mockReturnValue(defaultConfig());
+    setForcedExtensions(["drop"]);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+    await runAgent(ctx, "Explore", "go", { pi });
+    const { extensionsOverride } = defaultResourceLoaderCtor.mock.calls.at(-1)![0];
+    const base = {
+      extensions: [
+        { path: "/tmp/keep/index.ts", tools: new Map() },
+        { path: "/tmp/drop/index.ts", tools: new Map() },
+      ],
+    } as any;
+    // Both base "keep" and forced "drop" must survive
+    expect(extensionsOverride(base).extensions.map((e: { path: string }) => e.path))
+      .toEqual(["/tmp/keep/index.ts", "/tmp/drop/index.ts"]);
+  });
+
+  it("getDefaultSkills / getForced* reflect the last set value", () => {
+    setDefaultSkills(["s1"]);
+    expect(getDefaultSkills()).toEqual(["s1"]);
+    setDefaultSkills(undefined);
+    expect(getDefaultSkills()).toBeUndefined();
+    setForcedExtensions(["e1", "e2"]);
+    expect(getForcedExtensions()).toEqual(["e1", "e2"]);
+    setForcedExtensions(undefined);
+    expect(getForcedExtensions()).toBeUndefined();
+    setForcedSkills(["sk1"]);
+    expect(getForcedSkills()).toEqual(["sk1"]);
+    setForcedSkills(undefined);
+    expect(getForcedSkills()).toBeUndefined();
   });
 });

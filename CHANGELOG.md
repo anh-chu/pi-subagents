@@ -9,8 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **⚠️ Breaking ([#74](https://github.com/tintinweb/pi-subagents/pull/74)):** `extensions: [...]` in agent frontmatter is now a loader-level extension allowlist (names | paths | `"*"`), not a post-load tool-name substring filter. Excluded extensions no longer load, bind handlers, or register tools. To keep all extensions use `extensions: true` or `extensions: "*"`. The `tools:` field also gains `ext:foo` / `ext:foo/bar` selectors and a `*` built-in wildcard — any `ext:` entry flips extension tools to an explicit allowlist.
 
+> **⚠️ Breaking (this release):** Custom agent frontmatter that omits `skills:` no longer coerces to `true` (inherit all). Instead, omitted `skills:` now falls through to the new global `defaultSkills` setting (then `true` if that is also unset). To preserve the old behavior per-agent, set `skills: true` explicitly; or set `defaultSkills: true` globally to keep omitted-means-true everywhere.
+
 ### Added
 
+- **`defaultSkills`, `forcedExtensions`, `forcedSkills` global settings.** Three new `subagents.json` fields that complete the four-key surface (`defaultExtensions`, `forcedExtensions`, `defaultSkills`, `forcedSkills`):
+  - `defaultSkills` (`boolean \| string[]`): default for agents whose frontmatter omits `skills:` (mirrors `defaultExtensions`).
+  - `forcedExtensions` (`string[]`): extensions every agent always loads, **ignoring per-agent `extensions: false`**. Global + project arrays **union** (dedup, order-preserving); a project cannot erase a globally-forced extension.
+  - `forcedSkills` (`string[]`): skills every agent always preloads, **ignoring per-agent `skills: false`**. Same union semantics; entries are skill names, deduped by name after load.
+  - Mental model: `default*` controls what an agent gets when frontmatter omits the field. `forced*` controls what every agent always gets regardless of frontmatter (force wins, even on explicit `false`).
+  - Skill resolution chain: `agent.skills ?? defaultSkills ?? true`. Extension resolution unchanged for base; `forcedExtensions` unions paths/names/sources into the keepset and `additionalExtensionPaths`, and flips `noExtensions` off when base is `false`.
 - **`/agent-mode <agent-name>` and `/agent-mode-off` commands** — switch the current session to a brand-new session configured as the selected agent (system prompt, model, thinking level, tool allowlist). Prompts for confirmation because the current conversation is NOT carried over.
 - **Package source selectors in `extensions: [...]`.** Exact Pi source IDs prefixed with `npm:` or `git:`, such as `npm:pi-sessions`, `npm:@aliou/pi-neuralwatt`, and `git:github.com/anh-chu/pi-rewind-lite`, load every extension resource from that installed package.
 - **Parallel chain stages** — `chain: [{ parallel: [...] }]` now runs a static member set concurrently, merges labeled outputs into downstream `{previous}`, supports per-stage `continue_on_error`, and warns when writable members are not `isolation: "worktree"` isolated.

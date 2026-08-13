@@ -27,7 +27,7 @@ import { detectEnv } from "./env.js";
 import { applySubagentBridgeEnv, snapshotIntercomSessionId, withIntercomBridgeLock } from "./intercom-bridge.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
-import { preloadSkills } from "./skill-loader.js";
+import { type PreloadedSkill, preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
@@ -183,6 +183,23 @@ let defaultExtensions: true | string[] | false | undefined;
 export function getDefaultExtensions(): true | string[] | false | undefined { return defaultExtensions; }
 /** Set the global default extensions setting. */
 export function setDefaultExtensions(v: true | string[] | false | undefined): void { defaultExtensions = v; }
+
+/** Global default for an agent's `skills:` when its frontmatter omits the field. */
+let defaultSkills: true | string[] | false | undefined;
+export function getDefaultSkills(): true | string[] | false | undefined { return defaultSkills; }
+export function setDefaultSkills(v: true | string[] | false | undefined): void { defaultSkills = v; }
+
+/** Forced extensions always loaded on top of the agent's resolved set (additive).
+ * Applied even when the agent's frontmatter says `extensions: false`. */
+let forcedExtensions: string[] | undefined;
+export function getForcedExtensions(): string[] | undefined { return forcedExtensions; }
+export function setForcedExtensions(v: string[] | undefined): void { forcedExtensions = v; }
+
+/** Forced skills always preloaded on top of the agent's resolved skills (additive).
+ * Applied even when the agent's frontmatter says `skills: false`. */
+let forcedSkills: string[] | undefined;
+export function getForcedSkills(): string[] | undefined { return forcedSkills; }
+export function setForcedSkills(v: string[] | undefined): void { forcedSkills = v; }
 
 /** Normalize max turns. undefined or 0 = unlimited, otherwise minimum 1. */
 export function normalizeMaxTurns(n: number | undefined): number | undefined {
@@ -377,21 +394,45 @@ export async function runAgent(
   // Build prompt extras (memory, skill preloading)
   const extras: PromptExtras = {};
 
-  // Resolve extensions/skills: isolated overrides to false.
-  // Precedence for extensions: explicit per-agent frontmatter (incl. false) >
-  // global `defaultExtensions` setting > all. `agentConfig?.extensions` is
-  // undefined only when the frontmatter omitted the field; `??` lets an
-  // explicit `false` win while an omitted value falls through to the default.
+  // Resolve base: explicit per-agent frontmatter (incl. false) > global
+  // `default*` setting > built-in config. AgentConfig undefined only when the
+  // frontmatter omitted the field; `??` lets an explicit `false` win while an
+  // omitted value falls through to the default.
   const resolvedExtensions = agentConfig?.extensions ?? defaultExtensions ?? config.extensions;
-  const extensions = resolvedExtensions;
-  const skills = config.skills;
+  const resolvedSkills = agentConfig?.skills ?? defaultSkills ?? config.skills ?? true;
 
-  // Skill preloading: when skills is string[], preload their content into prompt
+  // Forced resources (additive): loaded independently of base, even when base
+  // is `false`. Global+project arrays already unioned by loadSettings().
+  const forcedExtList = forcedExtensions ?? [];
+  const forcedSkillList = forcedSkills ?? [];
+
+  // Extensions: force is applied by adjusting the loader-level filter below
+  // (forced names/paths are kept regardless of base; `extensions===false` gets
+  // flipped to a forced-only allowlist). The base value itself is preserved
+  // so other branches (true/loadAll, false/noExtensions) still work.
+  const extensions = resolvedExtensions;
+
+  // Skills: preload is additive. Base `true` lets the loader discover all
+  // skills (no preload here). Base `string[]` preloads those specific files.
+  // Base `false` preloads nothing. Forced skills are appended on top, deduped
+  // by skill name (name is the canonical key in preloadSkills).
+  const skills = resolvedSkills;
+  const preloaded: PreloadedSkill[] = [];
   if (Array.isArray(skills)) {
-    const loaded = preloadSkills(skills, effectiveCwd);
-    if (loaded.length > 0) {
-      extras.skillBlocks = loaded;
+    preloaded.push(...preloadSkills(skills, effectiveCwd));
+  }
+  if (forcedSkillList.length > 0) {
+    const forced = preloadSkills(forcedSkillList, effectiveCwd);
+    const seen = new Set(preloaded.map((s) => s.name));
+    for (const s of forced) {
+      if (!seen.has(s.name)) {
+        seen.add(s.name);
+        preloaded.push(s);
+      }
     }
+  }
+  if (preloaded.length > 0) {
+    extras.skillBlocks = preloaded;
   }
 
   let toolNames = getToolNamesForType(type);
@@ -465,14 +506,28 @@ export async function runAgent(
   const extSelectorsField = agentConfig?.extSelectors;
   const isExtSelectorsExplicit = agentConfig?.extSelectors !== undefined;
   const { extNames, narrowing, hasWildcard } = parseExtSelectors(extSelectorsField ?? []);
-  const noExtensions = extensions === false;
+  // Forced extensions: union into the keepsets so they load alongside the base.
+  // Force wins even on base===false (flips noExtensions off and reduces to a
+  // forced-only allowlist). Path entries become additionalExtensionPaths so the
+  // loader pulls them fresh when they're not in default-discovered.
+  const forcedSpec = forcedExtList.length > 0
+    ? parseExtensionsSpec(forcedExtList, effectiveCwd)
+    : null;
+
+  const noExtensions = extensions === false && !forcedSpec;
 
   const extensionsSpec = Array.isArray(extensions)
     ? parseExtensionsSpec(extensions, effectiveCwd)
     : undefined;
-  const keepNames = extensionsSpec?.names ?? new Set<string>();
-  const keepPaths = new Set(extensionsSpec?.paths);
-  const keepSources = extensionsSpec?.sources ?? new Set<string>();
+  const keepNames = new Set<string>(extensionsSpec?.names ?? []);
+  if (forcedSpec) for (const n of forcedSpec.names) keepNames.add(n);
+  const keepPaths = new Set<string>(extensionsSpec?.paths ?? []);
+  if (forcedSpec) for (const p of forcedSpec.paths) keepPaths.add(p);
+  const keepSources = new Set<string>(extensionsSpec?.sources ?? []);
+  if (forcedSpec) for (const s of forcedSpec.sources) keepSources.add(s);
+  // Union base + forced path entries (used for fresh-loading via the loader).
+  const allPaths: string[] = [...(extensionsSpec?.paths ?? [])];
+  if (forcedSpec) for (const p of forcedSpec.paths) if (!allPaths.includes(p)) allPaths.push(p);
   const keepSourcePaths = new Set<string>();
   if (keepSources.size > 0) {
     const sourceSettings = SettingsManager.create(effectiveCwd, agentDir);
@@ -493,8 +548,12 @@ export async function runAgent(
   // package source selectors are resolved from DefaultPackageManager first.
   // matches. It's only needed when we're neither loading everything (`extensions:
   // true` or a `"*"` wildcard) nor nothing (`noExtensions`).
+  // loadAll covers base===true or wildcard `"*"`. Forced path entries still
+  // flow through additionalExtensionPaths; forced names/sources are already
+  // in the discovered set under base===true, so no override filter is needed
+  // there. Override only runs for the explicit-list and forced-only cases.
   const loadAll = extensions === true || extensionsSpec?.wildcard === true;
-  const additionalExtensionPaths = extensionsSpec?.paths.length ? extensionsSpec.paths : undefined;
+  const additionalExtensionPaths = allPaths.length > 0 ? allPaths : undefined;
   const extensionsOverride: ((base: LoadExtensionsResult) => LoadExtensionsResult) | undefined =
     loadAll || noExtensions
       ? undefined
