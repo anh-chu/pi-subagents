@@ -16,6 +16,7 @@ A [pi](https://pi.dev) extension that brings **Claude Code-style autonomous sub-
 Most multi-agent tools spawn a child and wait for completion. pi-subagents is a **workflow engine** with observability and control for serious work:
 
 - **Real parallelism.** Launch many agents at once with automatic queuing. Foreground and background agents coexist. Nested agents spawn subagents. Parallel workers declare file ownership to avoid collisions.
+- **High-fidelity context handoffs.** Choose per dispatch how much a child inherits: `fresh`, a lossy `transcript`, or a structured `fork` that replays the parent's real conversation (tool calls, tool results, and thinking) and stays compaction-aware, so forking late in a long session doesn't overflow the child. See [Context Inheritance](#context-inheritance).
 - **You see everything.** Live widget shows spinners, tool activity, token usage, and context-window health per agent. Open any agent's full conversation live. Completion notifications are styled, not raw XML.
 - **Built-in workflows.** Ships `/feature`, `/feature-light`, `/execute-plan`, and `/orchestrate` slash commands that wire ready-made scout→plan→implement→review→fix pipelines. You get real work on install.
 - **Long-running work.** Steer agents mid-run, resume finished sessions, graceful turn limits (wrap-up warning before abort), git worktree isolation for safe parallel edits, scheduled jobs (cron/interval/one-shot).
@@ -250,7 +251,8 @@ Launch a sub-agent to handle a task autonomously.
 | `run_in_background` | boolean      | –        | true                | Run without blocking (background). Set to `false` to block and get result inline.              |
 | `resume`            | string       | –        | —                   | Agent ID to resume a previous session (preserves conversation history)                         |
 | `files`             | string[]     | –        | —                   | File paths this agent owns for collision detection (disjoint = suppresses warnings)           |
-| `inherit_context`   | boolean      | –        | false               | Fork parent conversation into agent (agent sees the thread so far)                            |
+| `context`           | string       | –        | `"fresh"`           | Parent-context strategy: `"fresh"` (none), `"transcript"` (lossy text, drops tool results), `"fork"` (structured, compaction-aware replay incl. tool results/thinking). See [Context Inheritance](#context-inheritance). |
+| `inherit_context`   | boolean      | –        | false               | Deprecated alias for `context: "transcript"`. Explicit `context` wins.                        |
 | `isolation`         | `"worktree"` | –        | —                   | Run in isolated git worktree (safe parallel edits, branches auto-created)                      |
 | `schedule`          | string       | –        | —                   | Schedule to fire later instead of now: cron (`"0 0 9 * * 1"`), interval (`"5m"`), or one-shot (`"+10m"`, ISO timestamp). Forces background. |
 
@@ -603,26 +605,29 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 
 ### reviewer
 
-**Role:** Code review specialist — validates diffs, plans, and changes.
+**Role:** Independent verifier that validates diffs, plans, and changes with evidence.
 
-**Tools:** All 7 (read-only in practice via system prompt)  
+**Tools:** read, bash, grep, find, ls (**read-only by capability**, cannot edit)  
 **Model:** Inherit parent  
-**Thinking:** Inherit parent  
-**Prompt:** Standalone (review-focused system prompt)  
+**Thinking:** high  
+**Memory:** none (no persistent state, to protect independence)  
+**Prompt:** Standalone verifier contract  
 **Max turns:** 30  
-**Use when:** After implementation, you need to verify correctness, check for regressions, validate plans against requirements. Reviewer inspects diffs, suggests fixes, and identifies issues.
+**Contract:** Runs verification commands (tests, type checks, builds, greps), attempts at least one adversarial probe where applicable, cites exact command + observed output + interpretation, and ends with an explicit `VERDICT: PASS | FAIL | PARTIAL`.  
+**Use when:** After implementation, you need an independent check for correctness and regressions. Because it cannot edit and carries no memory across sessions, its verdict reflects the change itself, not what it "remembers" about the project.
 
 ### oracle
 
-**Role:** Decision-consistency advisor — catches drift, maintains architectural coherence.
+**Role:** Decision-consistency auditor that catches drift against a supplied decision ledger.
 
 **Tools:** read, bash, grep, find, ls (read-only)  
 **Model:** Inherit parent  
 **Thinking:** medium  
-**Prompt:** Standalone (decision-consistency system prompt)  
+**Prompt:** Standalone (consistency-audit system prompt)  
 **Max turns:** 30  
-**Features:** Does not fork parent context (isolated session)  
-**Use when:** Before a risky decision, you want to check the current plan against inherited constraints, assumptions, and prior decisions. Oracle prevents silent drift.
+**Input:** Does not auto-inherit the parent conversation. Hand it a ledger in the prompt: current requirements, accepted decisions, rejected alternatives, and current implementation state.  
+**Output:** Contradictions with accepted decisions, unexplained drift from the plan, decisions invalidated by new evidence, and a recommended correction for each.  
+**Use when:** After a long or compaction-heavy session, you want the current work audited against decisions already made.
 
 ### orchestrator
 
@@ -633,8 +638,8 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 **Thinking:** low  
 **Prompt:** Standalone (active supervision system prompt)  
 **Max turns:** 40  
-**Features:** No file modification tools. Dispatches all work to specialized subagents (Explore, worker, reviewer, etc.). Monitors via `get_subagent_result()`. Steers drift with `steer_subagent()`. Reviews work via reviewer dispatch (not direct inspection). Does not inspect code itself; all facts come from subagent reports.  
-**Active supervision loop:** (1) Dispatch with complete briefs and expectations, (2) Monitor progress via periodic status checks, (3) Steer blockers or misunderstandings, (4) Review results via reviewer dispatch, (5) Iterate with follow-up workers. Never fire-and-forget.  
+**Features:** No file modification tools. Dispatches all work to specialized subagents (Explore, worker, reviewer, etc.). Steers drift with `steer_subagent()`. Reviews work via reviewer dispatch (not direct inspection). Does not inspect code itself; all facts come from subagent reports.  
+**Notification-first supervision:** (1) Dispatch with complete briefs and expectations, (2) let background agents run and wait for completion notifications rather than polling healthy workers, (3) check progress only when the user asks, a dependency is overdue, another result invalidates a worker's premise, or you need to steer before it finishes, (4) review results via reviewer dispatch, (5) iterate with follow-up workers. Every progress poll reinjects the noise delegation was meant to remove.  
 **Use when:** Orchestrating complex multi-step workflows with many independent units. Orchestrator plans, dispatches, oversees, and reviews via subagents, never doing direct work.
 
 **Comparison table:**
@@ -722,7 +727,8 @@ All fields are optional. Sensible defaults apply to everything.
 | `thinking`           | string                  | inherit        | Extended thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`                                                                         |
 | `max_turns`          | number                  | unlimited      | Max turns before graceful wrap-up. `0` or omitted = unlimited. Surfaced in tool type list for caller budgeting.                                    |
 | `prompt_mode`        | `append` \| `replace`   | `replace`      | `replace`: body is full system prompt. `append`: body appended to parent prompt (parent twin).                                                      |
-| `inherit_context`    | boolean                 | false          | Fork parent conversation into agent (agent sees thread so far). Surfaced in type list.                                                             |
+| `context`            | string                  | `fresh`        | Parent-context strategy: `fresh` (none), `transcript` (lossy text, drops tool results), `fork` (structured compaction-aware replay). Surfaced in type list. |
+| `inherit_context`    | boolean                 | false          | Deprecated alias for `context: transcript`. Explicit `context` wins.                                                                               |
 | `run_in_background`  | boolean                 | true           | Default to background mode (no blocking)                                                                                                            |
 | `enabled`            | boolean                 | true           | Set `false` to disable. Disabled agents stay visible in `/agents` but cannot be spawned, scheduled, or used in nested work.                         |
 | `recover_on_abort`   | boolean                 | false          | If true, graceful wrap-up (via steering) is attempted before hard abort. Worker agents default to true.                                            |
@@ -1010,7 +1016,7 @@ Agent({
 
 **Restrictions:**
 
-- `schedule` cannot combine with `inherit_context` (no parent at fire time) or `resume` (fresh agents only).
+- `schedule` cannot combine with `context` other than `"fresh"` / `inherit_context` (no parent at fire time) or `resume` (fresh agents only).
 - Headless `pi -p` does not wait for scheduled subagents.
 
 **Disable entirely:** `/agents` → Settings → Scheduling → disabled removes the `schedule` param from the Agent tool spec (no LLM-context cost) and stops any active scheduler.
@@ -1135,27 +1141,47 @@ Agent({
 
 ### Context Inheritance
 
-Fork the parent conversation into a subagent so it sees the thread so far:
+Control how much of the parent conversation a subagent inherits with the
+`context` axis. Three modes, ordered by fidelity:
 
 ```typescript
 Agent({
-  subagent_type: "oracle",
-  description: "Validate decision",
-  prompt: "Review the plan above and flag any drift against inherited decisions",
-  inherit_context: true,
+  subagent_type: "worker",
+  description: "Continue the refactor",
+  prompt: "Apply the change we just designed to the remaining call sites",
+  context: "fork",
 })
 ```
 
-**Behavior:**
+| Mode | What the child gets | Cost | Use for |
+|---|---|---|---|
+| `"fresh"` (default) | Nothing but its own prompt | Lowest | Independent verification, retries after a bad approach, self-contained tasks |
+| `"transcript"` | A plain-text projection of the parent thread (**tool results dropped**) | Low | A clean summary of what was discussed, without noisy tool output |
+| `"fork"` | A **structured replay** of the real conversation: user/assistant turns, tool calls, tool results, and thinking blocks | Higher | True continuation, where the child already knows what commands returned and what searches found |
 
-- Agent receives a copy of all prior messages in the current conversation.
-- Useful for high-context reviews (oracle), decision validation, and consistency checks.
-- Adds context-window cost — only use when the agent needs the full thread.
+**Why `fork` is more than "copy the messages":**
+
+- **Structured, not stringified.** The child's session is seeded with the
+  actual message tree, so tool calls and their outputs stay linked. `transcript`
+  throws tool results away; `fork` keeps them. In practice this means shorter
+  briefs: you don't re-paste "here's what that bash command printed."
+- **Compaction-aware.** `fork` replays the *resolved* LLM view of the parent
+  (via `buildSessionContext`). If the parent has been compacted, the child gets
+  the summary plus the kept tail, never the discarded pre-compaction history.
+  Forking late in a long session does not blow up the child's context window.
+- **Not a cache-identical fork.** The child still gets its own specialist system
+  prompt and its own tool set; this is a structured *context* fork, not an
+  inference-prefix fork. Historical tool calls are replayed for context, not
+  made callable.
+
+**Compatibility:** the older `inherit_context: true` still works as a deprecated
+alias for `context: "transcript"`. An explicit `context` always wins over it.
 
 **Not recommended:**
 
 - `Explore` (fast, read-only; context is wasted)
-- Scheduled jobs (no parent context exists at fire time; results in an error)
+- Scheduled jobs (no parent conversation exists at fire time; `context` other
+  than `"fresh"`, or `inherit_context: true`, is rejected)
 
 ### Persistent Agent Memory
 
@@ -1592,7 +1618,7 @@ src/
   output-file.ts             # Streaming output transcripts
   worktree.ts                # Git worktree isolation (create, cleanup)
   prompts.ts                 # System prompt builder (config-driven)
-  context.ts                 # Parent conversation for inherit_context
+  context.ts                 # Parent conversation inheritance (transcript + fork)
   env.ts                     # Environment detection (git, platform)
   settings.ts                # Settings persistence and loading
   schedule.ts                # Scheduled agent execution (cron/interval)
