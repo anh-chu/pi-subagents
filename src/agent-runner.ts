@@ -21,14 +21,14 @@ import {
   type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getConfig, getMemoryToolNames, getReadOnlyMemoryToolNames, getToolNamesForType } from "./agent-types.js";
-import { buildParentContext, extractText } from "./context.js";
+import { buildParentContext, extractText, seedForkedSessionManager } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
 import { applySubagentBridgeEnv, snapshotIntercomSessionId, withIntercomBridgeLock } from "./intercom-bridge.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { type PreloadedSkill, preloadSkills } from "./skill-loader.js";
-import type { SubagentType, ThinkingLevel } from "./types.js";
+import type { ContextMode, SubagentType, ThinkingLevel } from "./types.js";
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
 const EXCLUDED_TOOL_NAMES = ["Agent", "get_subagent_result", "steer_subagent"];
@@ -268,6 +268,9 @@ export interface RunOptions {
   maxTurns?: number;
   signal?: AbortSignal;
   inheritContext?: boolean;
+  /** Context inheritance strategy. When set, supersedes inheritContext.
+   * "fresh" = none, "transcript" = text projection, "fork" = structured replay. */
+  contextMode?: ContextMode;
   thinkingLevel?: ThinkingLevel;
   /** Nesting depth of this agent in the spawn tree (1 = direct child of the real session). Gates whether it inherits the Agent tools. */
   depth?: number;
@@ -749,10 +752,20 @@ export async function runAgent(
     return !noExtensions;
   });
 
+  // Context mode: explicit contextMode wins; else legacy inheritContext (true=transcript).
+  const contextMode: ContextMode =
+    options.contextMode ?? (options.inheritContext ? "transcript" : "fresh");
+
+  // For "fork", seed the child's SessionManager with a structured replay of the
+  // parent conversation (preserves tool results/thinking). Falls back to a fresh
+  // in-memory session when there is no parent history to seed.
+  const forkedSessionManager =
+    contextMode === "fork" ? seedForkedSessionManager(ctx, effectiveCwd) : undefined;
+
   const sessionOpts: Parameters<typeof createAgentSession>[0] = {
     cwd: effectiveCwd,
     agentDir,
-    sessionManager: SessionManager.inMemory(effectiveCwd),
+    sessionManager: forkedSessionManager ?? SessionManager.inMemory(effectiveCwd),
     settingsManager: SettingsManager.create(effectiveCwd, agentDir),
     modelRegistry: ctx.modelRegistry,
     model,
@@ -867,9 +880,11 @@ export async function runAgent(
   const collector = collectResponseText(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
 
-  // Build the effective prompt: optionally prepend parent context
+  // Build the effective prompt: for "transcript", prepend a text projection of
+  // the parent conversation. For "fork", history is already seeded structurally
+  // into the session (above), so the task prompt is sent as-is. "fresh" = as-is.
   let effectivePrompt = prompt;
-  if (options.inheritContext) {
+  if (contextMode === "transcript") {
     const parentContext = buildParentContext(ctx);
     if (parentContext) {
       effectivePrompt = parentContext + prompt;

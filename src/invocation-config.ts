@@ -1,4 +1,4 @@
-import type { AgentConfig, IsolationMode, JoinMode, ThinkingLevel } from "./types.js";
+import type { AgentConfig, ContextMode, IsolationMode, JoinMode, ThinkingLevel } from "./types.js";
 
 interface AgentInvocationParams {
   model?: string;
@@ -6,7 +6,23 @@ interface AgentInvocationParams {
   max_turns?: number;
   run_in_background?: boolean;
   inherit_context?: boolean;
+  context?: ContextMode;
   isolation?: IsolationMode;
+}
+
+/**
+ * Resolve the effective context mode from agent config and call params.
+ * Precedence: explicit `context` (param > config) wins; otherwise legacy
+ * `inherit_context` (param > config) maps true->transcript; default fresh.
+ */
+export function resolveContextMode(
+  agentConfig: AgentConfig | undefined,
+  params: AgentInvocationParams,
+): ContextMode {
+  const explicit = params.context ?? agentConfig?.context;
+  if (explicit) return explicit;
+  const legacy = params.inherit_context ?? agentConfig?.inheritContext;
+  return legacy ? "transcript" : "fresh";
 }
 
 export function resolveAgentInvocationConfig(
@@ -18,6 +34,7 @@ export function resolveAgentInvocationConfig(
   thinking?: ThinkingLevel;
   maxTurns?: number;
   inheritContext: boolean;
+  contextMode: ContextMode;
   runInBackground: boolean;
   isolation?: IsolationMode;
 } {
@@ -36,6 +53,7 @@ export function resolveAgentInvocationConfig(
     thinking: (agentConfig?.thinking ?? params.thinking) as ThinkingLevel | undefined,
     maxTurns: agentConfig?.maxTurns ?? params.max_turns,
     inheritContext: agentConfig?.inheritContext ?? params.inherit_context ?? false,
+    contextMode: resolveContextMode(agentConfig, params),
     runInBackground: agentConfig?.runInBackground ?? params.run_in_background ?? true,
     isolation: agentConfig?.isolation ?? params.isolation,
   };

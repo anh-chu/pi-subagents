@@ -173,7 +173,8 @@ export function buildInvocationTags(
   if (!invocation) return { tags };
   if (invocation.thinking) tags.push(`thinking: ${invocation.thinking}`);
   if (invocation.isolation === "worktree") tags.push("worktree");
-  if (invocation.inheritContext) tags.push("inherit context");
+  if (invocation.contextMode && invocation.contextMode !== "fresh") tags.push(`context: ${invocation.contextMode}`);
+  else if (invocation.inheritContext) tags.push("inherit context");
   if (invocation.runInBackground) tags.push("background");
   if (invocation.maxTurns != null) tags.push(`max turns: ${invocation.maxTurns}`);
   return { modelName: invocation.modelName, tags };

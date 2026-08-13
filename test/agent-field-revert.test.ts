@@ -3,6 +3,8 @@ import { revertFieldToDefault } from "../src/agent-field-revert.js";
 import { DEFAULT_AGENTS } from "../src/default-agents.js";
 
 const plan = DEFAULT_AGENTS.get("Plan")!;
+/** An agent whose default model is undefined (Plan now pins a model). */
+const noModelAgent = DEFAULT_AGENTS.get("worker")!;
 
 /** Simple description with no special chars, so it serializes unquoted. */
 const simpleDefault = { ...plan, description: "simple-planning-desc" };
@@ -38,8 +40,8 @@ description: Something
 model: gpt-5
 ---
 Custom body`;
-    const updated = revertFieldToDefault(content, "model", plan);
-    expect(plan.model).toBeUndefined();
+    const updated = revertFieldToDefault(content, "model", noModelAgent);
+    expect(noModelAgent.model).toBeUndefined();
     expect(updated).not.toMatch(/^model:/m);
     expect(updated).toContain("description: Something");
   });

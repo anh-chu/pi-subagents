@@ -20,6 +20,17 @@ export type MemoryScope = "user" | "project" | "local";
 /** Isolation mode for agent execution. */
 export type IsolationMode = "worktree";
 
+/**
+ * Context inheritance strategy for a spawned agent.
+ *  - "fresh":      no parent context (default). Self-contained prompt only.
+ *  - "transcript": lossy plain-text projection of the parent conversation
+ *                  (drops tool results), prepended to the task prompt.
+ *  - "fork":       structured replay of the parent's message history (preserves
+ *                  tool calls/results/thinking) seeded into the child session.
+ * Legacy `inherit_context: true` maps to "transcript".
+ */
+export type ContextMode = "fresh" | "transcript" | "fork";
+
 /** Unified agent configuration — used for both default and user-defined agents. */
 export interface AgentConfig {
   name: string;
@@ -42,8 +53,11 @@ export interface AgentConfig {
   maxTurns?: number;
   systemPrompt: string;
   promptMode: "replace" | "append";
-  /** Default for spawn: fork parent conversation. undefined = caller decides. */
+  /** Default for spawn: transcript projection of parent conversation. undefined = caller decides.
+   * Legacy alias for `context: "transcript"`; `context` wins when both are set. */
   inheritContext?: boolean;
+  /** Default for spawn: context inheritance strategy. Overrides inheritContext when set. */
+  context?: ContextMode;
   /** Default for spawn: run in background. undefined = caller decides. */
   runInBackground?: boolean;
 
@@ -127,6 +141,7 @@ export interface AgentInvocation {
   thinking?: ThinkingLevel;
   maxTurns?: number;
   inheritContext?: boolean;
+  contextMode?: ContextMode;
   runInBackground?: boolean;
   isolation?: IsolationMode;
 }

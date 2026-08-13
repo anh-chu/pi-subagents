@@ -673,7 +673,8 @@ export default function (pi: ExtensionAPI) {
     }
     // 0 means unlimited — don't advertise an unlimited cap.
     if (cfg.maxTurns && cfg.maxTurns > 0) tags.push(`≤${cfg.maxTurns} turns`);
-    if (cfg.inheritContext) tags.push("ctx-inherit");
+    if (cfg.context && cfg.context !== "fresh") tags.push(`ctx-${cfg.context}`);
+    else if (cfg.inheritContext) tags.push("ctx-inherit");
     return tags.length > 0 ? ` (${tags.join(", ")})` : "";
   };
 
@@ -822,7 +823,8 @@ Available agent types:
 ${buildTypeListText()}
 
 Hard invariants:
-- Prompts must be self-contained; agents do not see parent conversation unless inherit_context is true.
+- Prompts must be self-contained; agents do not see parent conversation unless context is "transcript" or "fork".
+- context: fresh (default) = no parent context; transcript = lossy text projection (drops tool results); fork = structured replay of parent history (preserves tool results/thinking).
 - Declare file ownership via files[] to detect overlaps and prevent clobbers.
 - Verify agent output before accepting as done; review diffs rather than trusting claims.
 
@@ -985,8 +987,17 @@ Notes:
       ),
       inherit_context: Type.Optional(
         Type.Boolean({
-          description: "Fork parent conversation. Default: false.",
+          description: "Deprecated alias for context:\"transcript\". Default: false.",
         }),
+      ),
+      context: Type.Optional(
+        Type.Union(
+          [Type.Literal("fresh"), Type.Literal("transcript"), Type.Literal("fork")],
+          {
+            description:
+              "Parent-context strategy. fresh=none (default); transcript=lossy text projection (drops tool results); fork=structured replay of parent history (preserves tool results/thinking). Supersedes inherit_context.",
+          },
+        ),
       ),
       isolation: Type.Optional(
         Type.Literal("worktree", {
@@ -1140,6 +1151,7 @@ Notes:
 
       const thinking = resolvedConfig.thinking;
       const inheritContext = resolvedConfig.inheritContext;
+      const contextMode = resolvedConfig.contextMode;
       const runInBackground = resolvedConfig.runInBackground;
       const isolation = resolvedConfig.isolation;
 
@@ -1156,6 +1168,7 @@ Notes:
         // Explicit value only — the default fallback would just add noise.
         maxTurns: resolvedConfig.maxTurns,
         inheritContext,
+        contextMode,
         runInBackground,
         isolation,
       };
@@ -1180,8 +1193,8 @@ Notes:
         if (params.resume) {
           return textResult("Cannot combine `schedule` with `resume` — schedules create fresh agents.");
         }
-        if (params.inherit_context) {
-          return textResult("Cannot combine `schedule` with `inherit_context` — there is no parent conversation at fire time.");
+        if (params.inherit_context || (params.context && params.context !== "fresh")) {
+          return textResult("Cannot combine `schedule` with `inherit_context`/`context` — there is no parent conversation at fire time.");
         }
         if (params.run_in_background === false) {
           return textResult("Cannot combine `schedule` with `run_in_background: false` — scheduled jobs always run in background.");
@@ -1254,6 +1267,7 @@ Notes:
             model,
             maxTurns: effectiveMaxTurns,
             inheritContext,
+            contextMode,
             thinkingLevel: thinking,
             isBackground: true,
             isolation,
@@ -1381,6 +1395,7 @@ Notes:
           model,
           maxTurns: effectiveMaxTurns,
           inheritContext,
+          contextMode,
           thinkingLevel: thinking,
           isolation,
           invocation: agentInvocation,
@@ -1436,6 +1451,7 @@ Notes:
               model,
               maxTurns: effectiveMaxTurns,
               inheritContext,
+              contextMode,
               thinkingLevel: thinking,
               isolation,
               invocation: agentInvocation,
@@ -1936,6 +1952,7 @@ Notes:
     const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
     const thinking = resolvedConfig.thinking;
     const inheritContext = resolvedConfig.inheritContext;
+    const contextMode = resolvedConfig.contextMode;
     const isolation = resolvedConfig.isolation;
     const displayName = getDisplayName(name);
     const agentInvocation: AgentInvocation = {
@@ -1945,6 +1962,7 @@ Notes:
       thinking,
       maxTurns: resolvedConfig.maxTurns,
       inheritContext,
+      contextMode,
       runInBackground: true,
       isolation,
     };
@@ -1966,6 +1984,7 @@ Notes:
         model,
         maxTurns: effectiveMaxTurns,
         inheritContext: idle ? false : inheritContext,
+        contextMode: idle ? "fresh" : contextMode,
         thinkingLevel: thinking,
         isBackground: true,
         // Idle agents don't run a turn, so don't occupy a concurrency slot
@@ -2187,7 +2206,8 @@ Notes:
     if (cfg.skills === false) fmFields.push("skills: false");
     else if (Array.isArray(cfg.skills)) fmFields.push(`skills: ${cfg.skills.join(", ")}`);
     if (cfg.disallowedTools?.length) fmFields.push(`disallowed_tools: ${cfg.disallowedTools.join(", ")}`);
-    if (cfg.inheritContext) fmFields.push("inherit_context: true");
+    if (cfg.context && cfg.context !== "fresh") fmFields.push(`context: ${cfg.context}`);
+    else if (cfg.inheritContext) fmFields.push("inherit_context: true");
     if (cfg.runInBackground) fmFields.push("run_in_background: true");
     if (cfg.memory) fmFields.push(`memory: ${cfg.memory}`);
     if (cfg.isolation) fmFields.push(`isolation: ${cfg.isolation}`);
@@ -2312,7 +2332,8 @@ prompt_mode: <"replace" (body IS the full system prompt) or "append" (body is ap
 extensions: <true (inherit all MCP/extension tools), false (none), or comma-separated names. Default: true>
 skills: <true (inherit all), false (none), or comma-separated skill names to preload into prompt. Default: true>
 disallowed_tools: <comma-separated tool names to block, even if otherwise available. Omit for none>
-inherit_context: <true to fork parent conversation into agent so it sees chat history. Default: false>
+inherit_context: <deprecated alias for context: transcript. Default: false>
+context: <"fresh" (none, default), "transcript" (lossy text projection of parent chat, drops tool results), or "fork" (structured replay of parent history incl. tool results/thinking)>
 run_in_background: <false to block until the agent finishes. Default: true>
 memory: <"user" (global), "project" (per-project), or "local" (gitignored per-project) for persistent memory. Omit for none>
 isolation: <"worktree" to run in isolated git worktree. Omit for normal>
@@ -2326,7 +2347,7 @@ Guidelines for choosing settings:
 - For code modification tasks: include edit, write
 - Use prompt_mode: append if the agent should keep the default system prompt and add specialization on top
 - Use prompt_mode: replace for fully custom agents with their own personality/instructions
-- Set inherit_context: true if the agent needs to know what was discussed in the parent conversation
+- Set context: transcript for a clean text summary of the parent chat, or context: fork to give the agent the parent's real structured history (tool results included)
 - Only include frontmatter fields that differ from defaults — omit fields where the default is fine
 
 Write the file using the write tool. Only write the file, nothing else.`;

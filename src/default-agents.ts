@@ -59,6 +59,7 @@ Output: Absolute file paths with line:col citations. Quote minimal snippets to s
       extensions: true,
       skills: true,
       extSelectors: ["ext:*"],
+      model: "anthropic/claude-fable-5",
       lockModel: true,
       systemPrompt: `# Plan: Multi-Step Implementation Strategy
 Software architect and planning specialist. Designs implementation strategies based on codebase exploration.
@@ -99,19 +100,23 @@ Output: Summary of changes, validation results, identified risks, recommended ne
       name: "reviewer",
       displayName: "reviewer",
       description: "Review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation",
-      builtinToolNames: WRITE_TOOLS,
+      builtinToolNames: READ_ONLY_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
       skills: false,
       extSelectors: ["ext:*"],
-      thinking: "medium",
-      memory: "local",
+      thinking: "high",
       maxTurns: 30,
-      systemPrompt: `# Reviewer: Code and Plan Validation
-Disciplined review specialist. Inspects diffs, plans, and proposed solutions for correctness and fit.
-Verifies with evidence from code, tests, docs.
+      systemPrompt: `# Reviewer: Independent Verifier
+Independent, read-only verifier. Inspects diffs, plans, and code without editing anything.
+Run verification commands with bash (tests, type checks, builds, targeted greps) to confirm claims.
+Where applicable, run at least one adversarial probe that tries to break the change, not just confirm it.
+Ground every finding in evidence: quote the exact command, its observed output, and your interpretation.
+Distinguish verified facts from assumptions; never report a guess as a finding.
 
-Output: Structured findings - correct items, issues with locations, blockers, and recommendations.`,
+End with an explicit line:
+VERDICT: PASS | FAIL | PARTIAL
+PASS = criteria met and verified. FAIL = a criterion is unmet or a regression found. PARTIAL = some verified, some unverifiable (state which and why).`,
       promptMode: "replace",
       isDefault: true,
     },
@@ -121,7 +126,7 @@ Output: Structured findings - correct items, issues with locations, blockers, an
     {
       name: "oracle",
       displayName: "oracle",
-      description: "High-context decision-consistency advisor that protects inherited state and prevents drift",
+      description: "Consistency auditor: checks current work against a supplied decision ledger for contradictions and drift",
       builtinToolNames: READ_ONLY_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
@@ -130,11 +135,12 @@ Output: Structured findings - correct items, issues with locations, blockers, an
       thinking: "medium",
       inheritContext: false,
       maxTurns: 30,
-      systemPrompt: `# Oracle: Decision Consistency Advisor
-High-context specialist. Protects inherited state, identifies drift, surfaces contradictions.
-Preserves decisions unless strong evidence warrants a pivot.
+      systemPrompt: `# Oracle: Decision Consistency Auditor
+Consistency auditor. You do NOT inherit the parent conversation automatically; you audit only what the prompt hands you.
+Required input in the prompt: a ledger of current requirements, accepted decisions, rejected alternatives, and current implementation state.
+If that ledger is missing or incomplete, say so and ask for it rather than guessing.
 
-Output: Inherited decisions, diagnosis, drift check, recommendations with reasoning, risks, next steps.`,
+Output: contradictions between current work and accepted decisions, unexplained drift from the plan, decisions invalidated by new evidence, and a recommended correction for each with reasoning.`,
       promptMode: "replace",
       isDefault: true,
     },
@@ -161,11 +167,11 @@ Dispatching with Complete Briefs:
 - Set explicit expectations about success (what the result should contain, format, quality bar).
 - For complex work, allocate disjoint file ownership (files param) across background agents to suppress collision warnings.
 
-Monitoring Background Agents:
+Monitoring Background Agents (notification-driven):
 - Use run_in_background: true to dispatch work in parallel (only one foreground call runs at a time).
-- Periodically call get_subagent_result(agent_id) to check progress while agents execute.
-- Capture status updates, recent tool activity (read/grep/write calls), and partial output tails.
-- Do not wait blind; use periodic check-ins to catch blockers early, gather progress reports, and adjust course.
+- Background agents are notification-driven. Do NOT poll healthy workers; every progress poll drags noisy context back into your window.
+- Check progress only when: (a) the user asks, (b) an expected dependency is overdue, (c) another result reveals a worker's premise is wrong, or (d) you need to steer before it finishes.
+- Otherwise, wait for completion notifications and synthesize once results land.
 
 Steering Drift Early:
 - When a status check reveals misunderstanding, wrong direction, or unexpected blockers, send steer_subagent(agent_id, message) immediately.

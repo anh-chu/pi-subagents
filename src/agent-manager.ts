@@ -12,7 +12,7 @@ import type { AgentSession, ExtensionAPI, ExtensionContext, ToolDefinition } fro
 import { agentDepth, resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { getAgentAvailability } from "./agent-types.js";
 import { registerRecord, unregisterRecord } from "./global-registry.js";
-import type { AgentInvocation, AgentRecord, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
+import type { AgentInvocation, AgentRecord, ContextMode, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage } from "./usage.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
 
@@ -42,6 +42,7 @@ interface SpawnOptions {
   model?: Model<any>;
   maxTurns?: number;
   inheritContext?: boolean;
+  contextMode?: ContextMode;
   thinkingLevel?: ThinkingLevel;
   isBackground?: boolean;
   /**
@@ -257,6 +258,7 @@ export class AgentManager {
       model: options.model,
       maxTurns: options.maxTurns,
       inheritContext: options.inheritContext,
+      contextMode: options.contextMode,
       thinkingLevel: options.thinkingLevel,
       depth: options.depth,
       cwd: worktreeCwd,

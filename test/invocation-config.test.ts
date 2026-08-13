@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAgentInvocationConfig, resolveJoinMode } from "../src/invocation-config.js";
+import { resolveAgentInvocationConfig, resolveContextMode, resolveJoinMode } from "../src/invocation-config.js";
 import type { AgentConfig } from "../src/types.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -96,6 +96,36 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.inheritContext).toBe(false);
     expect(resolved.runInBackground).toBe(true);
     expect(resolved.isolation).toBeUndefined();
+  });
+});
+
+describe("resolveContextMode", () => {
+  it("defaults to fresh", () => {
+    expect(resolveContextMode(undefined, {})).toBe("fresh");
+  });
+
+  it("maps legacy inherit_context param to transcript", () => {
+    expect(resolveContextMode(undefined, { inherit_context: true })).toBe("transcript");
+  });
+
+  it("maps legacy config inheritContext to transcript", () => {
+    expect(resolveContextMode(makeConfig({ inheritContext: true }), {})).toBe("transcript");
+  });
+
+  it("explicit context param wins over legacy inherit_context", () => {
+    expect(resolveContextMode(undefined, { context: "fork", inherit_context: true })).toBe("fork");
+  });
+
+  it("explicit context param overrides config inheritContext", () => {
+    expect(resolveContextMode(makeConfig({ inheritContext: true }), { context: "fresh" })).toBe("fresh");
+  });
+
+  it("config context applies when no param given", () => {
+    expect(resolveContextMode(makeConfig({ context: "fork" }), {})).toBe("fork");
+  });
+
+  it("param context overrides config context", () => {
+    expect(resolveContextMode(makeConfig({ context: "transcript" }), { context: "fork" })).toBe("fork");
   });
 });
 
