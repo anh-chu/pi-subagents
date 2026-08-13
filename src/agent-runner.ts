@@ -574,10 +574,14 @@ export async function runAgent(
     }
   }
 
-  // A subagent spawns mid-task, so a bad `extensions:`/`ext:` entry warns rather
-  // than aborts. Two distinct misconfigurations to catch:
-  //   - `extensions: [foo]` but no extension named foo was discovered (typo or
-  //     a path that failed to load).
+  // Fail-fast on any explicit `extensions:`/`ext:` entry that didn't load.
+  // A silent warn lets a misconfigured subagent spawn anyway (e.g. with a
+  // stripped OAuth-adapter extension), which then fails opaquely at the
+  // provider layer. Collect every miss in one pass so the caller sees the
+  // full typo set in a single error. Three misconfiguration classes:
+  //   - `extensions: [foo]` but no extension named foo was discovered.
+  //   - `extensions: [npm:foo]` / `git:...` package source with no surviving
+  //     resource for that source ID.
   //   - `tools: ext:foo` but foo isn't in the loaded set (because `extensions:`
   //     didn't include it). `ext:` does not pull extensions in; loading is
   //     `extensions:`-authoritative.
@@ -587,29 +591,32 @@ export async function runAgent(
       survivingExtensions.map((e) => extensionCanonicalName(e.path)),
     );
     const survivingPaths = new Set(survivingExtensions.map((e) => resolve(e.path)));
+    const missingNames: string[] = [];
+    const missingSources: string[] = [];
+    const missingExtNames: string[] = [];
     for (const name of keepNames) {
-      if (!survivingNames.has(name)) {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `extension-error:extension "${name}" requested by agent "${type}" was not loaded`,
-        });
-      }
+      if (!survivingNames.has(name)) missingNames.push(name);
     }
     for (const source of keepSources) {
-      if (![...keepSourcePaths].some(path => survivingPaths.has(path))) {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `extension-error:package source "${source}" requested by agent "${type}" was not loaded`,
-        });
-      }
+      if (![...keepSourcePaths].some(path => survivingPaths.has(path))) missingSources.push(source);
     }
     for (const name of extNames) {
-      if (!survivingNames.has(name)) {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `extension-error:ext:${name} referenced by agent "${type}" but extension "${name}" is not loaded (add it to extensions:)`,
-        });
+      if (!survivingNames.has(name)) missingExtNames.push(name);
+    }
+    if (missingNames.length || missingSources.length || missingExtNames.length) {
+      const lines: string[] = [];
+      if (missingNames.length) {
+        lines.push(`extension names not loaded: ${missingNames.map((n) => `"${n}"`).join(", ")}`);
       }
+      if (missingSources.length) {
+        lines.push(`package sources not loaded: ${missingSources.map((s) => `"${s}"`).join(", ")}`);
+      }
+      if (missingExtNames.length) {
+        lines.push(`ext: selectors referencing unloaded extensions: ${missingExtNames.map((n) => `ext:${n}`).join(", ")}`);
+      }
+      throw new Error(
+        `Agent "${type}" requested extensions that were not loaded. Fix the \`extensions:\`/\`tools:\` entries (or install the package):\n  - ${lines.join("\n  - ")}`,
+      );
     }
   }
 

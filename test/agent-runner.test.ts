@@ -10,6 +10,7 @@ const {
   buildMemoryBlock,
   buildReadOnlyMemoryBlock,
   getToolNamesForType,
+  mockLoadedExtensionsRef,
 } = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
   defaultResourceLoaderCtor: vi.fn(),
@@ -20,23 +21,47 @@ const {
   buildMemoryBlock: vi.fn(() => ""),
   buildReadOnlyMemoryBlock: vi.fn(() => ""),
   getToolNamesForType: vi.fn(() => ["read"]),
+  // Sync-accessible mirror of the package-resolved extensions. The mock
+  // `DefaultPackageManager.resolve()` writes here when it runs; tests that
+  // bypass resolve() (e.g. name/path-only selectors) can write to
+  // `mockLoadedExtensionsRef.value` directly to seed the loader.
+  mockLoadedExtensionsRef: { value: [] as any[] },
 }));
 
 vi.mock("@mariozechner/pi-coding-agent", () => ({
   createAgentSession,
   DefaultPackageManager: class {
     async resolve() {
-      return packageManagerResolve();
+      const resolved = await packageManagerResolve();
+      // Sync mirror so the mock `DefaultResourceLoader.getExtensions()` can
+      // return the post-resolve survivors without awaiting.
+      mockLoadedExtensionsRef.value = resolved.extensions ?? [];
+      return resolved;
     }
   },
   DefaultResourceLoader: class {
     constructor(options: any) {
+      this._options = options;
       defaultResourceLoaderCtor(options);
     }
 
     async reload() {}
     getExtensions() {
-      return { extensions: [] as Array<{ path: string; tools: Map<string, unknown> }> };
+      // Apply the loader-level override to the resolved extensions, mirroring
+      // the real loader's post-reload `extensions` set. This gives the
+      // orphan-detection pass in `runAgent` an accurate survivors list.
+      // Each survivor is normalized with an empty `tools` Map so downstream
+      // enumeration (extension.tools.keys()) doesn't crash on test fixtures.
+      const base = {
+        extensions: mockLoadedExtensionsRef.value.map((e: any) => ({
+          ...e,
+          tools: e.tools ?? new Map(),
+        })),
+      };
+      const result = this._options?.extensionsOverride
+        ? this._options.extensionsOverride(base)
+        : base;
+      return { extensions: result.extensions };
     }
   },
   getAgentDir,
@@ -323,6 +348,14 @@ describe("extension allowlist filtering", () => {
       inheritContext: false, runInBackground: false, isolated: false,
     });
     createAgentSession.mockResolvedValue({ session: createSession("x").session });
+    // Seed the resolver-backed survivors the bare-name selector must match.
+    // Two of the three have canonical name "src" (parent-of-index.ts);
+    // the third has canonical name "extensions" and should be filtered out.
+    mockLoadedExtensionsRef.value = [
+      { path: "/tmp/pi-quiet-tools/src/index.ts", tools: new Map() },
+      { path: "/tmp/unrelated/src/index.ts", tools: new Map() },
+      { path: "/tmp/pi-caveman/extensions/index.ts", tools: new Map() },
+    ];
 
     await runAgent(ctx, "Explore", "go", { pi });
 
@@ -336,6 +369,72 @@ describe("extension allowlist filtering", () => {
     } as any;
     expect(extensionsOverride(base).extensions.map((extension: { path: string }) => extension.path))
       .toEqual(["/tmp/pi-quiet-tools/src/index.ts", "/tmp/unrelated/src/index.ts"]);
+  });
+});
+
+describe("extension misconfiguration fail-fast", () => {
+  it("throws when a bare-name `extensions:` entry matches no loaded extension", async () => {
+    (mockedGetAgentConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: ["definitely-missing"], skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+
+    await expect(runAgent(ctx, "Explore", "go", { pi })).rejects.toThrow(
+      /Agent "Explore" requested extensions that were not loaded.*extension names not loaded: "definitely-missing"/s,
+    );
+    expect(createAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("throws when a package-source `extensions:` entry matches no loaded resource", async () => {
+    packageManagerResolve.mockResolvedValue({ extensions: [] });
+    (mockedGetAgentConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: ["npm:pi-claude-oauth-adapter"], skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+    });
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+
+    await expect(runAgent(ctx, "Explore", "go", { pi })).rejects.toThrow(
+      /package sources not loaded: "npm:pi-claude-oauth-adapter"/s,
+    );
+    expect(createAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("throws when an `ext:` selector references an extension that `extensions:` excluded", async () => {
+    mockLoadedExtensionsRef.value = [
+      { path: "/tmp/pi-quiet-tools/src/index.ts", tools: new Map() },
+    ];
+    (mockedGetAgentConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: false, skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+      extSelectors: ["ext:quiet-tools"],
+    } as any);
+    getToolNamesForType.mockReturnValue(["read"]);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+
+    await expect(runAgent(ctx, "Explore", "go", { pi })).rejects.toThrow(
+      /ext: selectors referencing unloaded extensions: ext:quiet-tools/s,
+    );
+    expect(createAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("collects every miss class in a single error when multiple entries are bad", async () => {
+    packageManagerResolve.mockResolvedValue({ extensions: [] });
+    (mockedGetAgentConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      name: "Explore", description: "Explore", builtinToolNames: ["read"],
+      extensions: ["missing-name", "npm:missing-source"], skills: false, systemPrompt: "x", promptMode: "replace",
+      inheritContext: false, runInBackground: false, isolated: false,
+      extSelectors: ["ext:also-missing"],
+    } as any);
+    getToolNamesForType.mockReturnValue(["read"]);
+    createAgentSession.mockResolvedValue({ session: createSession("x").session });
+
+    await expect(runAgent(ctx, "Explore", "go", { pi })).rejects.toThrow(
+      /extension names not loaded: "missing-name".*package sources not loaded: "npm:missing-source".*ext: selectors referencing unloaded extensions: ext:also-missing/s,
+    );
   });
 });
 
@@ -394,6 +493,7 @@ beforeEach(() => {
   settingsManagerCreate.mockClear();
   packageManagerResolve.mockReset();
   packageManagerResolve.mockResolvedValue({ extensions: [] });
+  mockLoadedExtensionsRef.value = [];
   getToolNamesForType.mockReturnValue(["read"]);
   (mockedGetAgentConfig as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
     name: "Explore", description: "Explore", builtinToolNames: ["read"],
