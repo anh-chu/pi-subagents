@@ -4,18 +4,18 @@ import { describe, expect, it } from "vitest";
 
 describe("Reviewer defects - regression tests", () => {
   describe("4. Cleanup - em dash and trailing whitespace", () => {
-    it("README.md line 1511 should not have em dash and should have colon", () => {
+    it("the {{guidelines}} template row should not have an em dash and should use a colon", () => {
       const readmePath = join(import.meta.dirname || ".", "..", "README.md");
       const content = readFileSync(readmePath, "utf-8");
-      const lines = content.split("\n");
-      const line1511 = lines[1547]; // 0-indexed (line numbers are 1-indexed, so 1548-1 = 1547)
+      const line = content
+        .split("\n")
+        .find(l => l.includes("`{{guidelines}}`"));
 
+      expect(line, "expected a README line mentioning `{{guidelines}}`").toBeDefined();
       // Should not have em dash (—)
-      expect(line1511).not.toContain("—");
-      // Should have the guidelines placeholder
-      expect(line1511).toContain("`{{guidelines}}`");
+      expect(line).not.toContain("—");
       // Should have colon instead of em dash
-      expect(line1511).toContain(":");
+      expect(line).toContain(":");
     });
   });
 
