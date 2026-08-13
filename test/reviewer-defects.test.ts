@@ -62,19 +62,21 @@ describe("Reviewer defects - regression tests", () => {
       expect(sessionStartMatch).toBeDefined();
     });
 
-    it("should not truncate model list at 15 models", () => {
+    it("should prefer session scopedModels over the full registry", () => {
       const indexPath = join(import.meta.dirname || ".", "..", "src", "index.ts");
       const content = readFileSync(indexPath, "utf-8");
 
       // Find buildModelListText function
-      const buildModelMatch = content.match(/const buildModelListText = \(\)[^}]*?return.*?\};/s);
+      const buildModelMatch = content.match(/const buildModelListText = \(\): string => \{[\s\S]*?\n  \};/);
       expect(buildModelMatch).toBeDefined();
       const buildModelText = buildModelMatch![0];
 
-      // Should NOT have .slice(0, 15)
-      expect(buildModelText).not.toContain(".slice(0, 15)");
-      // Should mention total count for long lists
-      expect(buildModelText).toContain("modelIds.length > 15");
+      // Should source the list from ctx.scopedModels (the /scoped-models set)
+      expect(buildModelText).toContain("scopedModels");
+      // Should only fall back to getAvailable() when no scoping is configured
+      expect(buildModelText).toContain("getAvailable?.()");
+      // Should note that fuzzy aliases / provider-id still resolve
+      expect(buildModelText).toContain("provider/id");
     });
   });
 });

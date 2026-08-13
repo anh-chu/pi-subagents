@@ -727,24 +727,29 @@ export default function (pi: ExtensionAPI) {
 
   /** Build dynamic model catalog from available models in the current session. */
   const buildModelListText = (): string => {
+    // Advertise the session's scoped models (ctx.scopedModels) — the same set
+    // the built-in /scoped-models picker shows, resolved at session start from
+    // --models / enabledModels. Docs explicitly steer extensions to this over
+    // dumping the whole catalogue via modelRegistry.getAvailable(). When no
+    // scoping is configured scopedModels is empty (every model usable), so we
+    // fall back to the full registry in that case only.
+    const scoped = (currentCtx as any)?.scopedModels as Array<{ model?: any }> | undefined;
+    const note = 'any "provider/id" or fuzzy alias (e.g. "haiku", "sonnet") also accepted';
+    const idOf = (m: any): string =>
+      typeof m === "string" ? m : (m?.id || m?.name || String(m));
+
+    if (scoped && scoped.length > 0) {
+      const ids = scoped.map((e) => idOf(e?.model ?? e));
+      return `${ids.join(", ")} (${note})`;
+    }
+
+    // No scoping configured — fall back to the available catalogue.
     const models = currentCtx?.modelRegistry?.getAvailable?.();
     if (!models || models.length === 0) {
-      return "(models not available; consult your pi configuration for available models)";
+      return `(models not available; ${note})`;
     }
-    // Format each model as "provider/id" (or just id if no provider prefix)
-    const modelIds = models.map((m: any) => {
-      // Extract the model ID; format varies by model type, but usually has an 'id' property
-      return m.id || m.name || String(m);
-    });
-    if (modelIds.length === 0) {
-      return "(no available models)";
-    }
-    // Include all models in the list; if >15, add a count note
-    const modelList = modelIds.join(", ");
-    if (modelIds.length > 15) {
-      return `${modelList} (${modelIds.length} total)`;
-    }
-    return modelList;
+    const modelIds = models.map(idOf);
+    return `${modelIds.join(", ")} (${modelIds.length} available; ${note})`;
   };
 
   /** Detect if pi-fabric is installed (check for package presence). */
