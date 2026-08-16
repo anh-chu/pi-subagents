@@ -34,6 +34,12 @@ describe("agents-md-block utility functions", () => {
       expect(content).toContain("Knowledge");
     });
 
+    it("includes cheap dispatch boundaries to prevent over-delegation", () => {
+      const content = generateBlockContent();
+      expect(content).toContain("Cheap Dispatch Boundaries");
+      expect(content).toContain("Do NOT dispatch a subagent for:");
+    });
+
     it("includes workflow design shapes", () => {
       const content = generateBlockContent();
       expect(content).toContain("Sequential");

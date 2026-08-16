@@ -82,6 +82,15 @@ Decide inline-vs-delegate by what your context needs, not by task size:
 
 **Do not double-work.** Once you delegate a workstream, stop running the same searches or edits yourself. Spend coordinator context on synthesis and the next decision.
 
+## Cheap Dispatch Boundaries
+
+Do NOT dispatch a subagent for:
+- A single-file read that answers a simple factual question.
+- Validation commands you can run directly (\`git status\`, \`git diff --stat\`, test suites, builds).
+- Reading output you could produce yourself with one tool call.
+
+When deciding, ask: "Could one direct tool call answer this faster than a full subagent round-trip?" If yes, act inline.
+
 ## Routing Principle: Workload-Based Tier Language
 
 Select agents by workload tier, not vendor or model name:
