@@ -670,6 +670,9 @@ export default function (pi: ExtensionAPI) {
     if (cfg.model) {
       tags.push(getModelLabelFromConfig(cfg.model));
       if (cfg.lockModel) tags.push("locked");
+    } else {
+      // No default configured: the dispatcher must choose an explicit model.
+      tags.push("no default model — choose one");
     }
     // 0 means unlimited — don't advertise an unlimited cap.
     if (cfg.maxTurns && cfg.maxTurns > 0) tags.push(`≤${cfg.maxTurns} turns`);

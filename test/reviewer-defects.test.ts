@@ -24,15 +24,16 @@ describe("Reviewer defects - regression tests", () => {
       const defaultAgentsPath = join(import.meta.dirname || ".", "..", "src", "default-agents.ts");
       const content = readFileSync(defaultAgentsPath, "utf-8");
 
-      // Find the orchestrator's system prompt (the one with Active Supervision)
-      const activeSuperStart = content.indexOf("# Orchestrator: Active Supervision");
+      // Find the orchestrator's system prompt in default agents source
+      let activeSuperStart = content.indexOf("# Orchestrator: ");
+      expect(activeSuperStart).toBeGreaterThan(-1);
       const nextConfigStart = content.indexOf("Output Contract:", activeSuperStart);
       const orchestratorPrompt = content.substring(activeSuperStart, nextConfigStart + 300);
 
       // Should NOT contain the phrase about reading files directly
       expect(orchestratorPrompt).not.toContain("reading modified files yourself");
       // Should still mention reviewer dispatch
-      expect(orchestratorPrompt).toContain("reviewer dispatch");
+      expect(orchestratorPrompt).toContain("dispatch reviewer");
     });
   });
 

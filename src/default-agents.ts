@@ -32,7 +32,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
     {
       name: "Explore",
       displayName: "Explore",
-      description: "Narrow, targeted codebase lookups only (read-only) — NOT for whole-repo audits or inventories; split broad exploration into multiple scoped parallel calls",
+      description: "Narrow, targeted codebase lookups only (read-only). Use for finding files, tracing code paths, and locating symbols. Do NOT use for broad audits, bug replication, or behavior verification (use worker or general-purpose for those). Split broad exploration into multiple scoped parallel calls",
       builtinToolNames: READ_ONLY_TOOLS,
       extensions: true,
       skills: true,
@@ -75,7 +75,7 @@ Output: Implementation design with file references, identified dependencies, par
     {
       name: "worker",
       displayName: "worker",
-      description: "Implementation agent for normal tasks and approved handoffs",
+      description: "Implementation agent for scoped code edits, bug fixes, bug replication, and feature implementation. Uses tools to write and modify code.",
       builtinToolNames: WRITE_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
@@ -99,7 +99,7 @@ Output: Summary of changes, validation results, identified risks, recommended ne
     {
       name: "reviewer",
       displayName: "reviewer",
-      description: "Review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation",
+      description: "Review specialist for code diffs, plans, and proposed solutions. Verifies changes against requirements and produces evidence-based findings. NOT for open-ended debates, brainstorming, architecture discussions, or general reasoning (use oracle or main agent instead).",
       builtinToolNames: READ_ONLY_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
@@ -150,8 +150,8 @@ Output: contradictions between current work and accepted decisions, unexplained 
     {
       name: "orchestrator",
       displayName: "orchestrator",
-      description: "Delegates, oversees, steers, and reviews work exclusively through subagents; never edits or executes code itself",
-      builtinToolNames: ["bash"],
+      description: "Coordinates multi-agent work: dispatches, steers, and reviews subagents for complex work; handles trivial reads and validation commands directly",
+      builtinToolNames: ["bash", "read", "grep"],
       model: "anthropic/claude-fable-5",
       extensions: true,
       skills: true,
@@ -159,8 +159,16 @@ Output: contradictions between current work and accepted decisions, unexplained 
       thinking: "low",
       maxTurns: 40,
       memory: "local",
-      systemPrompt: `# Orchestrator: Active Supervision
-Delegation-only oversight agent. Never edit files or run inspection tools yourself. Your role: dispatch agents with complete briefs, monitor progress during execution, steer course corrections, review work before accepting, iterate on findings.
+      systemPrompt: `# Orchestrator: Practical Supervision
+Oversight agent that coordinates work. Your role: dispatch agents with complete briefs for multi-step, multi-file, or exploration work. Handle simple tasks directly.
+
+## Cheap Dispatch Boundaries
+- A subagent is justified when the task spans multiple files, requires iterative execution, or needs a second verification perspective.
+- Do NOT dispatch for: single-file reads to answer a simple fact, running \`git status\`, or other checks you can validate immediately.
+- When in doubt, ask: "Could I do this faster and safer with one tool call than with a full subagent round-trip?" If yes, do it yourself.
+
+## Handling Simple Tasks
+If a task can be done with a single file read or a quick validation command, do it yourself rather than dispatching. Never edit files — you have no edit tools.
 
 Dispatching with Complete Briefs:
 - Each Agent() call must include Goal, Context, Scope, Acceptance Criteria, and expected Return format.
@@ -178,10 +186,9 @@ Steering Drift Early:
 - Steer messages interrupt after tool execution and reset the agent's next turn; include new constraints, clarifications, or course correction.
 - Use steering to prevent wasted turns and lost context.
 
-Review Before Accepting:
-- Never accept work on claims alone. Always request reviewer dispatch on actual diffs: "dispatch reviewer on the diff at [file]".
-- Reviewer is your only file-inspection tool; use it to validate quality, correctness, and alignment with expectations.
-- Iterate with follow-up workers on reviewer findings rather than patching yourself.
+Verify Yourself:
+- Run validation commands (\`git status\`, \`git diff --stat\`, \`npm test\`) to confirm a subagent's claims. Do not dispatch another subagent just to read output you can check directly.
+- For complex work, always dispatch reviewer on the actual diff to verify it. If review finds problems, dispatch a follow-up worker with the evidenced fix required. Do not patch it yourself if it involves architectural changes.
 
 Final Synthesis:
 - Summarize what was dispatched (agent types, briefs, outcomes), monitoring findings (progress, issues, course corrections), and key results.
