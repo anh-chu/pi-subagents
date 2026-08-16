@@ -11,7 +11,7 @@ import type { Model } from "@mariozechner/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { agentDepth, resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { getAgentAvailability } from "./agent-types.js";
-import { registerRecord, unregisterRecord } from "./global-registry.js";
+import { listGlobalRecords, pruneSettledDescendants, registerRecord, unregisterRecord } from "./global-registry.js";
 import type { AgentInvocation, AgentRecord, ContextMode, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage } from "./usage.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees, } from "./worktree.js";
@@ -28,6 +28,60 @@ export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; toke
 
 /** Default max concurrent background agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
+const DESCENDANT_SECTION = "\n\n---\nDescendant work:\n";
+const MAX_DESCENDANT_LINES = 12;
+const MAX_DESCENDANT_PREVIEW = 180;
+
+function shortPreview(value: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > MAX_DESCENDANT_PREVIEW
+    ? `${compact.slice(0, MAX_DESCENDANT_PREVIEW - 1)}…`
+    : compact;
+}
+
+function appendDescendantWork(record: AgentRecord): void {
+  if (record.result?.includes(DESCENDANT_SECTION)) return;
+
+  const children = new Map<string, AgentRecord[]>();
+  for (const candidate of listGlobalRecords()) {
+    if (!candidate.parentId) continue;
+    const siblings = children.get(candidate.parentId) ?? [];
+    siblings.push(candidate);
+    children.set(candidate.parentId, siblings);
+  }
+
+  const descendants: { record: AgentRecord; level: number }[] = [];
+  const visited = new Set<string>([record.id]);
+  const visit = (parentId: string, level: number) => {
+    for (const child of children.get(parentId) ?? []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
+      descendants.push({ record: child, level });
+      visit(child.id, level + 1);
+    }
+  };
+  visit(record.id, 0);
+  if (descendants.length === 0) return;
+
+  const lines = descendants.slice(0, MAX_DESCENDANT_LINES).map(({ record: child, level }) => {
+    const detail = child.result
+      ? `; result: ${shortPreview(child.result)}`
+      : child.error
+        ? `; error: ${shortPreview(child.error)}`
+        : "";
+    return `${"  ".repeat(level)}- type=${child.type}; task=${shortPreview(child.description)}; status=${child.status}${detail}`;
+  });
+  if (descendants.length > MAX_DESCENDANT_LINES) {
+    lines.push(`- … ${descendants.length - MAX_DESCENDANT_LINES} more descendant(s)`);
+  }
+  const result = record.result ? `\n\n---\nAgent result:\n${record.result}` : "";
+  record.result = `${DESCENDANT_SECTION}${lines.join("\n")}${result}`;
+}
+
+function finalizeDescendantWork(record: AgentRecord): void {
+  appendDescendantWork(record);
+  pruneSettledDescendants(record.id);
+}
 
 interface SpawnArgs {
   pi: ExtensionAPI;
@@ -321,6 +375,8 @@ export class AgentManager {
           }
         }
 
+        finalizeDescendantWork(record);
+
         if (options.isBackground) {
           this.runningBackground--;
           try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
@@ -351,6 +407,8 @@ export class AgentManager {
             record.worktreeResult = wtResult;
           } catch { /* ignore cleanup errors */ }
         }
+
+        finalizeDescendantWork(record);
 
         if (options.isBackground) {
           this.runningBackground--;
@@ -452,10 +510,12 @@ export class AgentManager {
       record.status = "completed";
       record.result = responseText;
       record.completedAt = Date.now();
+      finalizeDescendantWork(record);
     } catch (err) {
       record.status = "error";
       record.error = err instanceof Error ? err.message : String(err);
       record.completedAt = Date.now();
+      finalizeDescendantWork(record);
     }
 
     return record;

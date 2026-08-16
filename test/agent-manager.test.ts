@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../src/agent-manager.js";
 import { registerAgents } from "../src/agent-types.js";
+import { listGlobalRecords } from "../src/global-registry.js";
 import type { AgentConfig, AgentRecord } from "../src/types.js";
 
 vi.mock("../src/agent-runner.js", async () => ({
@@ -411,6 +412,119 @@ describe("AgentManager — nesting depth", () => {
     expect(manager.getRecord(nested)!.depth).toBe(2);
     expect(manager.getRecord(nested)!.parentId).toBe("p1");
     expect(manager.getRecord(top)!.parentId).toBeUndefined();
+  });
+});
+
+describe("AgentManager — descendant summaries", () => {
+  let manager: AgentManager;
+
+  afterEach(() => manager?.dispose());
+
+  it("adds completed nested descendant task and status to the settling parent result", async () => {
+    const runs = new Map<string, { resolve: (value: any) => void; promise: Promise<any> }>();
+    vi.mocked(runAgent).mockImplementation((_ctx, _type, prompt) => {
+      let resolve!: (value: any) => void;
+      const promise = new Promise<any>((settle) => { resolve = settle; });
+      runs.set(prompt, { resolve, promise });
+      return promise;
+    });
+    manager = new AgentManager();
+
+    const parentId = agentDepth.run({ id: "root", depth: 0 }, () =>
+      manager.spawn(mockPi, mockCtx, "general-purpose", "parent task", {
+        description: "parent task", isBackground: true,
+      }),
+    );
+    const descendantId = agentDepth.run({ id: parentId, depth: 1 }, () =>
+      manager.spawn(mockPi, mockCtx, "general-purpose", "nested task", {
+        description: "nested task", isBackground: true,
+      }),
+    );
+
+    runs.get("nested task")!.resolve({
+      responseText: "nested result", session: mockSession(), aborted: false, steered: false,
+    });
+    await manager.getRecord(descendantId)!.promise;
+    manager.clearCompleted();
+    expect(manager.getRecord(descendantId)).toBeUndefined();
+    expect(listGlobalRecords().map(record => record.id)).toContain(descendantId);
+
+    runs.get("parent task")!.resolve({
+      responseText: "parent result", session: mockSession(), aborted: false, steered: false,
+    });
+    await manager.getRecord(parentId)!.promise;
+
+    expect(manager.getRecord(parentId)!.result).toContain("nested task");
+    expect(manager.getRecord(parentId)!.result).toMatch(/completed/i);
+    expect(manager.getRecord(parentId)!.result).toMatch(/^\n\n---\nDescendant work:/);
+    expect(listGlobalRecords().map(record => record.id)).not.toContain(descendantId);
+  });
+
+  it("leaves a direct child's result unchanged when it has no descendants", async () => {
+    manager = new AgentManager();
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "direct child result", session: mockSession(), aborted: false, steered: false,
+    });
+
+    const childId = agentDepth.run({ id: "root", depth: 0 }, () =>
+      manager.spawn(mockPi, mockCtx, "general-purpose", "direct child task", {
+        description: "direct child task", isBackground: true,
+      }),
+    );
+    await manager.getRecord(childId)!.promise;
+
+    expect(manager.getRecord(childId)!.result).toBe("direct child result");
+  });
+
+  it("appends each summary once for both background and foreground parent delivery", async () => {
+    for (const isBackground of [true, false]) {
+      const runs = new Map<string, { resolve: (value: any) => void; promise: Promise<any> }>();
+      let parentId = "";
+      vi.mocked(runAgent).mockReset();
+      vi.mocked(runAgent).mockImplementation((_ctx, _type, prompt, options: any) => {
+        if (prompt === "parent task") parentId = options.agentId;
+        let resolve!: (value: any) => void;
+        const promise = new Promise<any>((settle) => { resolve = settle; });
+        runs.set(prompt, { resolve, promise });
+        return promise;
+      });
+      manager = new AgentManager();
+
+      const parent = agentDepth.run({ id: "root", depth: 0 }, () =>
+        isBackground
+          ? manager.spawn(mockPi, mockCtx, "general-purpose", "parent task", {
+              description: "parent task", isBackground: true,
+            })
+          : manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "parent task", {
+              description: "parent task",
+            }),
+      );
+      const descendantId = agentDepth.run({ id: parentId, depth: 1 }, () =>
+        manager.spawn(mockPi, mockCtx, "general-purpose", "nested task", {
+          description: "nested task", isBackground: true,
+        }),
+      );
+
+      runs.get("nested task")!.resolve({
+        responseText: "nested result", session: mockSession(), aborted: false, steered: false,
+      });
+      await manager.getRecord(descendantId)!.promise;
+      runs.get("parent task")!.resolve({
+        responseText: "parent result", session: mockSession(), aborted: false, steered: false,
+      });
+
+      let record: AgentRecord;
+      if (typeof parent === "string") {
+        await manager.getRecord(parent)!.promise;
+        record = manager.getRecord(parent)!;
+      } else {
+        record = await parent;
+      }
+      const matches = record.result!.match(/nested task/g) ?? [];
+      expect(matches).toHaveLength(1);
+
+      manager.dispose();
+    }
   });
 });
 
