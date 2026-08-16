@@ -34,33 +34,36 @@ describe("agents-md-block utility functions", () => {
       expect(content).toContain("Knowledge");
     });
 
-    it("includes workflow design shapes", () => {
+    it("includes workflow guidance", () => {
       const content = generateBlockContent();
       expect(content).toContain("Sequential");
       expect(content).toContain("Parallel fan-out");
-      expect(content).toContain("Dispatch-Review-Iterate");
+      expect(content).toContain("Dispatch-review-iterate");
+      expect(content).toContain("run_in_background: true");
     });
 
-    it("includes routing principle with workload language", () => {
+    it("routes preset agents without vendor names", () => {
       const content = generateBlockContent();
-      expect(content).toContain("Cheap");
-      expect(content).toContain("Mid-tier");
-      expect(content).toContain("Strongest available");
+      expect(content).toContain("Explore");
+      expect(content).toContain("Plan");
+      expect(content).toContain("worker");
+      expect(content).toContain("reviewer");
+      expect(content).toContain("oracle");
       expect(content).not.toContain("Haiku");
       expect(content).not.toContain("Sonnet");
       expect(content).not.toContain("Opus");
       expect(content).not.toContain("Claude");
     });
 
-    it("includes brief scaffold and skill reference", () => {
+    it("includes brief format and skill reference", () => {
       const content = generateBlockContent();
-      expect(content).toContain("Brief Scaffold");
+      expect(content).toContain("Brief format");
       expect(content).toContain("Goal");
       expect(content).toContain("Context");
       expect(content).toContain("Scope");
       expect(content).toContain("Acceptance");
       expect(content).toContain("Return");
-      expect(content).toContain("Skill Reference");
+      expect(content).toContain("Cite domain guidance directly");
     });
 
     it("does not include orchestrator supervision methodology", () => {

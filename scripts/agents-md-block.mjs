@@ -32,7 +32,7 @@ function createBlockRegex() {
 
 /**
  * The guidance block content for AGENTS.md.
- * Documents four-dial concept, workflow design, routing principle, brief scaffold, skill reference.
+ * Documents standalone four-dial, delegation, routing, and briefing guidance.
  * No orchestrator-role/supervision content (that lives in orchestrator built-in template).
  */
 export function generateBlockContent() {
@@ -40,93 +40,48 @@ export function generateBlockContent() {
 
 # Four-Dial Orchestration with pi-subagents
 
-## Four Dials: Brief, Brain, Powers, Knowledge
+Tailor each dispatch across four independent dials:
 
-When dispatching a subagent, tailor four independent dimensions:
+1. **Brief**: Self-contained task, context, boundaries, and success criteria.
+2. **Brain**: Model and thinking level suited to task complexity.
+3. **Powers**: Built-in preset or custom agent from \`.pi/agents/*.md\`.
+4. **Knowledge**: Relevant skill or memory Markdown files, cited by absolute path in the brief.
 
-1. **Brief**: Self-contained prompt describing the task, context, constraints, and success criteria.
-2. **Brain**: Model selection and thinking level settings per dispatch.
-3. **Powers**: Agent type preset (general-purpose, Explore, Plan, worker, reviewer, oracle) or omit for bare general-purpose with all tools available.
-4. **Knowledge**: Skill references and memory files cited by absolute path within the brief.
+## Delegate deliberately
 
-## Workflow Design Shapes
+- Delegate bounded work when you need its conclusion, not its intermediate output. Keep work inline when you must reason with raw evidence.
+- Parent owns synthesis and decisions. Do not delegate understanding or repeat delegated searches or edits.
+- Give every child a self-contained brief. It starts without your session context unless you explicitly provide it.
+- For parallel edits, declare non-overlapping \`files: [...]\`. \`isolation: "worktree"\` changes working directory, not sandboxing.
 
-Choose the coordination pattern that fits your task:
+## Choose a workflow
 
-- **Default to \`run_in_background: true\`.** Dispatch all independent, file-disjoint agents in one message, then collect results.
-- **Block on a single agent only when the next dispatch genuinely depends on its result.** Dispatching one agent, waiting, then dispatching an unrelated one is an error.
+- **Parallel fan-out**: Default to \`run_in_background: true\`. Dispatch independent, file-disjoint work in one message, then collect results.
+- **Sequential**: Wait only when next dispatch depends on prior result.
+- **Dispatch-review-iterate**: Review result before asking for refinement or follow-up work.
 
-- **Sequential**: Dependency-ordered background dispatches. Dispatch one agent in the background, collect its result, then decide and dispatch the next step (observation-driven iteration).
-  Use when the next step depends on the previous outcome.
+## Route by workload
 
-- **Parallel fan-out**: Dispatch multiple background agents with independent briefs in one message, then collect all results.
-  Use when subtasks are truly independent (e.g., search multiple code patterns in parallel).
+- **Explore**: Read-only codebase recon.
+- **Plan**: Ambiguous, cross-cutting, or high-risk implementation planning.
+- **worker**: Bounded implementation and tests.
+- **reviewer**: Independent review after non-trivial changes.
+- **oracle**: Strong second opinion for risky decisions.
+- **general-purpose**: Child needing parent's full tools and reasoning context.
 
-- **Dispatch-Review-Iterate**: Dispatch an agent, review their work, send follow-up instructions or dispatch a different agent to refine.
-  Use when initial work needs refinement or validation before proceeding.
+Select model and thinking level by workload, not vendor name. Use the least costly capability that meets task needs. Available models and preset defaults are in the \`Agent\` tool description.
 
-For each dispatch, choose between:
-- **Bare dispatch**: Invoke the agent once and accept the result.
-- **Built-in templates**: Use a preset agent type (Explore for read-only search, worker for trusted implementation).
-- **Custom agents**: Define agent types in .pi/agents/*.md for domain-specific presets.
+## Brief format
 
-## Delegation Criterion: Context Economics
+Include all five:
 
-Decide inline-vs-delegate by what your context needs, not by task size:
+1. **Goal**: Verifiable outcome.
+2. **Context**: Known facts, constraints, dependencies, and ruled-out approaches.
+3. **Scope**: Boundaries, including paths and whether edits are allowed.
+4. **Acceptance**: Observable conditions for success.
+5. **Return**: Required result format and length.
 
-- Delegate work whose intermediate output (searches, reads, edits, test runs) you will not reason over again — you only need its conclusion.
-- Keep work inline when you must think with the raw output.
-- Multi-file or long work usually delegates because it generates disposable debris, not because it is "big". A directed lookup with a known target stays inline even if it touches several files.
-
-**Never delegate understanding.** Understand a result before dispatching the next concrete step. Avoid "based on your findings, fix it" handoffs; state the diagnosis and the specific change instead.
-
-**Do not double-work.** Once you delegate a workstream, stop running the same searches or edits yourself. Spend coordinator context on synthesis and the next decision.
-
-## Routing Principle: Workload-Based Tier Language
-
-Select agents by workload tier, not vendor or model name:
-
-- **Cheap**: Extraction, summarization, grunt work (e.g., find files matching a pattern, list directory structure).
-  Use least powerful available agent.
-
-- **Mid-tier**: Bounded implementation tasks (e.g., add a small feature, refactor a function, write tests).
-  Use a capable, balanced agent.
-
-- **Strongest available**: Ambiguous design decisions, high-stakes code review, complex architectural changes.
-  Use your most powerful available model/agent.
-
-*Note: Concrete model defaults and available models are listed in the Agent tool description (see Agent tool documentation).
-Tier routing uses workload language only; no vendor family names in this guidance.*
-
-## Brief Scaffold: Goal, Context, Scope, Acceptance, Return
-
-Structure your dispatch briefs with these five elements:
-
-1. **Goal**: One-sentence description of what you want the agent to accomplish.
-2. **Context**: Background information, prior findings, constraints, or dependencies the agent needs to know.
-3. **Scope**: Explicit boundaries (what to do and what not to do; e.g., "read-only", "do not modify config files").
-4. **Acceptance**: How you will evaluate success (what does "done" look like?).
-5. **Return**: Expected output format (structured data, code, summary, file edits, etc.).
-
-Example:
-\`\`\`
-Goal: Identify all places where user authentication is checked in the codebase.
-Context: We are refactoring auth to support multi-factor authentication and need a map of all auth touchpoints.
-Scope: Search src/ and tests/ only. Ignore vendor and build artifacts. List functions, not individual lines.
-Acceptance: Complete list of auth functions/modules and their file locations.
-Return: Markdown table with columns: file, function name, line number, auth type (session/token/mfa).
-\`\`\`
-
-## Skill Reference Pattern: Cite .md Files by Path
-
-When you need the agent to apply domain-specific knowledge, cite .md files by absolute path in the brief rather than using a skills parameter.
-
-Example:
-\`\`\`
-Context: Refer to /home/user/projects/myapp/CODING_STANDARDS.md for code style, and /home/user/projects/myapp/SECURITY_POLICY.md for security checks.
-\`\`\`
-
-This keeps the brief self-contained and allows the agent to fetch knowledge as needed.
+Cite domain guidance directly in the brief, for example: \`Refer to /absolute/path/CODING_STANDARDS.md for code style.\`
 
 <!-- pi-subagents:end -->`;
 }
