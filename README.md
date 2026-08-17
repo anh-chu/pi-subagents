@@ -618,16 +618,16 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 
 ### oracle
 
-**Role:** Decision-consistency auditor that catches drift against a supplied decision ledger.
+**Role:** Expensive, high-capability agent for second opinions, hard judgment calls, and consultation.
 
 **Tools:** read, bash, grep, find, ls (read-only)  
 **Model:** Inherit parent  
 **Thinking:** medium  
-**Prompt:** Standalone (consistency-audit system prompt)  
+**Prompt:** Standalone (second-opinion consultant system prompt)  
 **Max turns:** 30  
-**Input:** Does not auto-inherit the parent conversation. Hand it a ledger in the prompt: current requirements, accepted decisions, rejected alternatives, and current implementation state.  
-**Output:** Contradictions with accepted decisions, unexplained drift from the plan, decisions invalidated by new evidence, and a recommended correction for each.  
-**Use when:** After a long or compaction-heavy session, you want the current work audited against decisions already made.
+**Input:** Does not auto-inherit the parent conversation. The caller compiles a curated brief rather than dumping the transcript: the question, relevant context, constraints, options already considered, and current state.  
+**Output:** A direct recommendation with reasoning, key trade-offs, risks or blind spots the caller may have missed, and (when relevant) contradictions or drift from the decisions stated in the brief.  
+**Use when:** You need a strong second opinion, an expert consultation, or a hard call sanity-checked against a brief you compile.
 
 ### orchestrator
 
@@ -651,7 +651,7 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 | Plan              | Read-only (5)   | Inherit parent  | Yes    | 2     | No      | -         | Architecture & implementation plan |
 | worker            | All 7           | Inherit parent  | No     | 2     | No      | -         | Code implementation                |
 | reviewer          | All 7 (ro)      | Inherit parent  | No     | 1     | No      | 30        | Code review & validation           |
-| oracle            | Read-only (5)   | Inherit parent  | No     | 1     | No      | 30        | Decision consistency advisor       |
+| oracle            | Read-only (5)   | Inherit parent  | No     | 1     | No      | 30        | Second-opinion consultant          |
 | orchestrator      | bash only       | claude-fable-5  | Yes    | 1     | No      | 40        | Active supervision & orchestration  |
 
 **Managing defaults:**
@@ -1083,10 +1083,10 @@ Switch the current session into a brand-new session configured as a selected age
    /agent-mode-off
    ```
 
-3. **Validate with oracle:** Test decision consistency interactively.
+3. **Consult oracle:** Get a second opinion interactively.
    ```
    /agent-mode oracle
-   > Does this refactoring contradict the plan we discussed earlier?
+   > Here is the plan and the change I made. Is this the right call, and what am I missing?
    /agent-mode-off
    ```
 

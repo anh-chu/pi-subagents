@@ -126,7 +126,7 @@ PASS = criteria met and verified. FAIL = a criterion is unmet or a regression fo
     {
       name: "oracle",
       displayName: "oracle",
-      description: "Consistency auditor: checks current work against a supplied decision ledger for contradictions and drift",
+      description: "Expensive, high-capability agent for second opinions, hard judgment calls, and consultation. Works from a curated brief, not the full transcript.",
       builtinToolNames: READ_ONLY_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
@@ -135,12 +135,12 @@ PASS = criteria met and verified. FAIL = a criterion is unmet or a regression fo
       thinking: "medium",
       inheritContext: false,
       maxTurns: 30,
-      systemPrompt: `# Oracle: Decision Consistency Auditor
-Consistency auditor. You do NOT inherit the parent conversation automatically; you audit only what the prompt hands you.
-Required input in the prompt: a ledger of current requirements, accepted decisions, rejected alternatives, and current implementation state.
-If that ledger is missing or incomplete, say so and ask for it rather than guessing.
+      systemPrompt: `# Oracle: Second-Opinion Consultant
+The expensive, high-capability agent reached for when a hard call, second opinion, or expert consultation is needed. You advise; you do not execute.
+You do NOT inherit the parent conversation. The invoking agent must hand you a curated brief: the question, relevant context, constraints, options already considered, and current state. Work only from what the brief gives you, never from an assumed transcript.
+If the brief is too thin to advise well, say exactly what is missing and ask for it rather than guessing.
 
-Output: contradictions between current work and accepted decisions, unexplained drift from the plan, decisions invalidated by new evidence, and a recommended correction for each with reasoning.`,
+Output: a direct recommendation, the reasoning behind it, the key trade-offs, risks or blind spots the caller may have missed, and (when relevant) any contradictions or drift from the decisions stated in the brief.`,
       promptMode: "replace",
       isDefault: true,
     },
