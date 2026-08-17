@@ -24,6 +24,7 @@ import { BUILTIN_TOOL_NAMES, getAgentAvailability, getAgentConfig, getAllTypes, 
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
+import { buildRejectMessage, contractSignature, getContract, validateDispatch } from "./dispatch-contract.js";
 import { deleteGlobalActivity, setGlobalActivity } from "./global-registry.js";
 import { formatGrindStatus, GrindCounter } from "./grind-counter.js";
 import { GroupJoinManager } from "./group-join.js";
@@ -691,12 +692,12 @@ export default function (pi: ExtensionAPI) {
 
     const defaultDescs = defaultNames.map((name) => {
       const cfg = getAgentConfig(name);
-      return `- ${name}: ${cfg?.description ?? name}${buildConfigTags(cfg)}`;
+      return `- ${name}: ${cfg?.description ?? name}${buildConfigTags(cfg)}${contractSignature(getContract(cfg))}`;
     });
 
     const customDescs = userNames.map((name) => {
       const cfg = getAgentConfig(name);
-      return `- ${name}: ${cfg?.description ?? name}${buildConfigTags(cfg)}`;
+      return `- ${name}: ${cfg?.description ?? name}${buildConfigTags(cfg)}${contractSignature(getContract(cfg))}`;
     });
 
     return [
@@ -716,17 +717,11 @@ export default function (pi: ExtensionAPI) {
     return name.replace(/-\d{8}$/, "");
   }
 
-  /** First sentence of an agent description — for the compact type list. */
-  const firstSentence = (text: string): string => {
-    const match = text.match(/^.*?[.!?](?=\s|$)/s);
-    return (match ? match[0] : text).replace(/\s+/g, " ").trim();
-  };
-
-  /** Compact type list: one line per available agent, first sentence only. */
+  /** Compact type list: one line per available agent, full description. */
   const buildCompactTypeListText = () =>
     getAvailableTypes().map((name) => {
       const cfg = getAgentConfig(name);
-      return `- ${name}: ${firstSentence(cfg?.description ?? name)}${buildConfigTags(cfg)}`;
+      return `- ${name}: ${cfg?.description ?? name}${buildConfigTags(cfg)}${contractSignature(getContract(cfg))}`;
     }).join("\n");
 
   /** Build dynamic model catalog from available models in the current session. */
@@ -988,6 +983,11 @@ Notes:
           },
         ),
       ),
+      request: Type.Optional(
+        Type.Record(Type.String(), Type.Unknown(), {
+          description: "Structured request. Validated against the target agent's `contract` JSON Schema when it declares one.",
+        }),
+      ),
       inherit_context: Type.Optional(
         Type.Boolean({
           description: "Deprecated alias for context:\"transcript\". Default: false.",
@@ -1246,6 +1246,15 @@ Notes:
           buildDetails(detailBase, record),
         );
       }
+
+      // ---- Dispatch contract gate (Layer 1, inert) ----
+      // Runs once, after the schedule and resume early-returns and before both
+      // spawn branches, so a single validation covers background and foreground.
+      // Resume and schedule are exempt in v1; the recovery re-spawn reuses the
+      // already-validated params and needs no re-check.
+      const schema = getContract(customConfig);
+      const verdict = validateDispatch(schema, params.request as Record<string, unknown> | undefined);
+      if (!verdict.ok) return textResult(buildRejectMessage(subagentType, schema!, verdict.errors));
 
       // Background execution
       if (runInBackground) {

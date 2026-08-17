@@ -69,6 +69,9 @@ function loadFromDir(dir: string, agents: Map<string, AgentConfig>, source: "pro
         : inheritField(fm.skills ?? fm.inherit_skills),
       model: str(fm.model),
       lockModel: fm.lock_model === true,
+      contract: fm.contract && typeof fm.contract === "object" && !Array.isArray(fm.contract)
+        ? fm.contract as Record<string, unknown>
+        : undefined,
       thinking: str(fm.thinking) as ThinkingLevel | undefined,
       maxTurns: nonNegativeInt(fm.max_turns),
       systemPrompt: body.trim(),

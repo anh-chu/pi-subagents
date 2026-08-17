@@ -49,6 +49,7 @@ Most multi-agent tools spawn a child and wait for completion. pi-subagents is a 
   - [Persistent Agent Memory](#persistent-agent-memory)
   - [Graceful Max Turns](#graceful-max-turns)
   - [Recovery on Abort](#recovery-on-abort)
+  - [Dispatch Contract Gate](#dispatch-contract-gate)
   - [Skill Preloading](#skill-preloading)
   - [Tool Denylist](#tool-denylist)
   - [Grind Counter](#grind-counter)
@@ -251,6 +252,7 @@ Launch a sub-agent to handle a task autonomously.
 | `run_in_background` | boolean      | –        | true                | Run without blocking (background). Set to `false` to block and get result inline.              |
 | `resume`            | string       | –        | -                   | Agent ID to resume a previous session (preserves conversation history)                         |
 | `files`             | string[]     | –        | -                   | File paths this agent owns for collision detection (disjoint = suppresses warnings)           |
+| `request`           | object       | –        | -                   | Open structured request object. Validated by Ajv against the target agent's `contract` JSON Schema when declared; omitted contracts admit all requests. See [Dispatch Contract Gate](#dispatch-contract-gate). |
 | `context`           | string       | –        | `"fresh"`           | Parent-context strategy: `"fresh"` (none), `"transcript"` (lossy text, drops tool results), `"fork"` (structured, compaction-aware replay incl. tool results/thinking). See [Context Inheritance](#context-inheritance). |
 | `inherit_context`   | boolean      | –        | false               | Deprecated alias for `context: "transcript"`. Explicit `context` wins.                        |
 | `isolation`         | `"worktree"` | –        | -                   | Run in isolated git worktree (safe parallel edits, branches auto-created)                      |
@@ -732,6 +734,7 @@ All fields are optional. Sensible defaults apply to everything.
 | `run_in_background`  | boolean                 | true           | Default to background mode (no blocking)                                                                                                            |
 | `enabled`            | boolean                 | true           | Set `false` to disable. Disabled agents stay visible in `/agents` but cannot be spawned, scheduled, or used in nested work.                         |
 | `recover_on_abort`   | boolean                 | false          | If true, graceful wrap-up (via steering) is attempted before hard abort. Worker agents default to true.                                            |
+| `contract`           | object                  | -              | JSON Schema for validating this agent's structured `request` with Ajv. Omitted contracts are inert and admit every request. |
 
 The body (everything after the `---` frontmatter block) becomes the agent's system prompt. If `prompt_mode: append`, it is appended to the parent's prompt (parent twin behavior). If `prompt_mode: replace`, it is the full prompt.
 
@@ -1296,6 +1299,27 @@ Recovery uses a multi-checkpoint protocol and fallback strategy:
 **Retry behavior:** Recovery proceeds through the steps above. The final agent status may be `error`, `aborted`, or `success`.
 
 **Configure:** Set `recover_on_abort: true` in `.pi/agents/<name>.md` frontmatter only. This is a per-agent setting; there is no global on/off switch via `/agents` Settings.
+
+### Dispatch Contract Gate
+
+A deterministic, zero-token check runs before a sub-agent spawns. The gate is **inert by default**: agents without a `contract` admit every request, so existing dispatches remain unchanged.
+
+**Structured request.** Alongside `prompt`, the `Agent` tool accepts an optional open `request` object. When an agent declares `contract`, the request is validated as a generic JSON Schema by Ajv. Authors define their own fields and structural/type requirements; the dispatcher has no knowledge of field names or domain semantics.
+
+```yaml
+contract:
+  type: object
+  required: [goals, scope]
+  properties:
+    goals: { type: string }
+    scope:
+      type: object
+      required: [includes]
+      properties:
+        includes: { type: array, items: { type: string } }
+```
+
+**How it works.** Validation runs before either spawn branch. On failure it lists each failing path, then shows the target agent's JSON Schema so the rejection teaches the caller. A broken author schema fails open and does not block dispatch. Agents with contracts show a one-line, type-aware signature in the type list (for example `worker(goals: string, scope: { includes: [string] })`; deep nesting collapses to `object`/`array`, and a schema too wide for a line falls back to bare key names). A second, LLM-judgment layer remains deliberately deferred.
 
 ### Skill Preloading
 
