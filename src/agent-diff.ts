@@ -35,6 +35,7 @@ interface NormalizedConfig {
   isolation: string | undefined;
   recoverOnAbort: string | undefined;
   disallowedTools: string | undefined;
+  contract: string | undefined;
 }
 
 /**
@@ -64,6 +65,7 @@ function normalize(cfg: AgentConfig): NormalizedConfig {
     isolation: cfg.isolation ?? undefined,
     recoverOnAbort: fmtBool(cfg.recoverOnAbort),
     disallowedTools: fmtArr(cfg.disallowedTools),
+    contract: cfg.contract ? JSON.stringify(cfg.contract) : undefined,
   };
 }
 
@@ -85,6 +87,7 @@ const FIELD_LABELS: Record<keyof NormalizedConfig, string> = {
   isolation: "Isolation",
   recoverOnAbort: "Recover on abort",
   disallowedTools: "Disallowed tools",
+  contract: "Contract",
 };
 
 /**
@@ -173,6 +176,7 @@ export function diffFromDefault(cfg: AgentConfig): DiffEntry[] | null {
   compare("isolation");
   compare("recoverOnAbort");
   compare("disallowedTools");
+  compare("contract");
   compare("systemPrompt"); // last — longest output
 
   return entries.length > 0 ? entries : null;

@@ -136,6 +136,15 @@ describe("differsFromDefault", () => {
     expect(differsFromDefault(override("worker", { thinking: "high" }))).toBe(true);
   });
 
+  // ---- contract ----
+  it("returns true when the contract differs", () => {
+    expect(differsFromDefault(override("Plan", { contract: { type: "object" } }))).toBe(true);
+  });
+
+  it("returns true when the contract is removed", () => {
+    expect(differsFromDefault(override("Plan", { contract: undefined }))).toBe(true);
+  });
+
   // ---- source coverage: project and global overrides both considered ----
   it("detects diff for project-source override", () => {
     const plan = override("Plan", {
@@ -255,6 +264,13 @@ describe("diffFromDefault", () => {
   it("returns entries for added extSelectors", () => {
     const r = diffFromDefault(override("Plan", { extSelectors: ["ext:foo"] }));
     expect(field(r, "Extension selectors")).toBeDefined();
+  });
+
+  it("returns an entry for a changed contract", () => {
+    const r = diffFromDefault(override("Plan", { contract: { type: "object", required: ["x"] } }));
+    const e = field(r, "Contract");
+    expect(e).toBeDefined();
+    expect(e!.local).toContain('"required":["x"]');
   });
 
   // ---- systemPrompt diff format ----

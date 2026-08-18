@@ -24,6 +24,7 @@ const FRONTMATTER_KEYS: Partial<Record<string, string>> = {
   isolation: "isolation",
   recoverOnAbort: "recover_on_abort",
   disallowedTools: "disallowed_tools",
+  contract: "contract",
 };
 
 const SAFE_BARE_VALUE = /^[A-Za-z0-9_./-]+$/;
@@ -103,6 +104,12 @@ export function revertFieldToDefault(content: string, fieldKey: string, def: Age
     const v = def.disallowedTools;
     if (v === undefined) return setFrontmatterField(content, fmKey, undefined);
     return setFrontmatterField(content, fmKey, v.length ? v.join(", ") : "none");
+  }
+
+  if (fieldKey === "contract") {
+    // The contract is a nested JSON Schema, serialized as one line of inline
+    // JSON (valid YAML flow syntax) so the frontmatter stays single-line.
+    return setFrontmatterField(content, fmKey, def.contract ? JSON.stringify(def.contract) : undefined);
   }
 
   let raw: string | number | boolean | undefined;

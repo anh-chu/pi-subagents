@@ -81,6 +81,30 @@ Body`;
     expect(updated).toContain('description: "Has: a colon"');
   });
 
+  it("reverts the contract to the default's inline JSON on one line", () => {
+    const content = `---
+description: x
+contract: {"type":"object","required":["foo"]}
+---
+Body`;
+    const updated = revertFieldToDefault(content, "contract", noModelAgent);
+    expect(noModelAgent.contract).toBeDefined();
+    expect(updated).toContain(`contract: ${JSON.stringify(noModelAgent.contract)}`);
+    expect(updated).not.toContain('["foo"]');
+    expect(updated).toContain("description: x");
+  });
+
+  it("removes the contract when the default has none", () => {
+    const content = `---
+description: x
+contract: {"type":"object"}
+---
+Body`;
+    const updated = revertFieldToDefault(content, "contract", { ...plan, contract: undefined });
+    expect(updated).not.toMatch(/^contract:/m);
+    expect(updated).toContain("description: x");
+  });
+
   it("returns content unchanged for an unrecognized field key", () => {
     const content = `---
 description: plain

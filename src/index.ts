@@ -2074,8 +2074,12 @@ Notes:
     }
     // Always offer a direct background spawn (no orchestrator prompt needed).
     menuOptions.splice(menuOptions.indexOf("Back"), 0, "Spawn (background)");
+    // Offer to inspect the dispatch contract when the agent declares one.
+    const contractSchema = getContract(cfg);
+    if (contractSchema) menuOptions.splice(menuOptions.indexOf("Back"), 0, "View contract");
 
-    const choice = await ctx.ui.select(name, menuOptions);
+    const signature = contractSignature(contractSchema);
+    const choice = await ctx.ui.select(signature ? `${name}  ${signature}` : name, menuOptions);
     if (!choice || choice === "Back") return;
 
     if (choice === "Edit" && file) {
@@ -2113,6 +2117,8 @@ Notes:
       await viewDiffAndRevertFlow(ctx, name);
     } else if (choice === "Spawn (background)") {
       await spawnBackgroundFromMenu(ctx, name, cfg);
+    } else if (choice === "View contract" && contractSchema) {
+      await ctx.ui.editor(`Contract: ${name} (read-only)`, JSON.stringify(contractSchema, null, 2));
     }
   }
 
@@ -2212,6 +2218,9 @@ Notes:
     if (cfg.model) fmFields.push(`model: ${cfg.model}`);
     if (cfg.thinking) fmFields.push(`thinking: ${cfg.thinking}`);
     if (cfg.maxTurns) fmFields.push(`max_turns: ${cfg.maxTurns}`);
+    // Contract is a nested JSON Schema; emit it as one line of inline JSON
+    // (valid YAML flow syntax) so it round-trips through parseFrontmatter.
+    if (cfg.contract) fmFields.push(`contract: ${JSON.stringify(cfg.contract)}`);
     fmFields.push(`prompt_mode: ${cfg.promptMode}`);
     if (cfg.extensions === false) fmFields.push("extensions: false");
     else if (Array.isArray(cfg.extensions)) fmFields.push(`extensions: ${cfg.extensions.join(", ")}`);
@@ -2349,6 +2358,7 @@ context: <"fresh" (none, default), "transcript" (lossy text projection of parent
 run_in_background: <false to block until the agent finishes. Default: true>
 memory: <"user" (global), "project" (per-project), or "local" (gitignored per-project) for persistent memory. Omit for none>
 isolation: <"worktree" to run in isolated git worktree. Omit for normal>
+contract: <optional JSON Schema as inline JSON that validates the caller's structured request, e.g. {"type":"object","required":["goal"],"properties":{"goal":{"type":"string"}}}. A dispatch whose request fails the schema is rejected before spawn. Omit for no contract>
 ---
 
 <system prompt body — instructions for the agent>
