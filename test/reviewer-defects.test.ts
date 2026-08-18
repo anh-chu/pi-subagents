@@ -19,24 +19,6 @@ describe("Reviewer defects - regression tests", () => {
     });
   });
 
-  describe("3. MAJOR - orchestrator prompt contradiction", () => {
-    it("orchestrator should not mention direct file reading", () => {
-      const defaultAgentsPath = join(import.meta.dirname || ".", "..", "src", "default-agents.ts");
-      const content = readFileSync(defaultAgentsPath, "utf-8");
-
-      // Find the orchestrator's system prompt in default agents source
-      let activeSuperStart = content.indexOf("# Orchestrator: ");
-      expect(activeSuperStart).toBeGreaterThan(-1);
-      const nextConfigStart = content.indexOf("Output Contract:", activeSuperStart);
-      const orchestratorPrompt = content.substring(activeSuperStart, nextConfigStart + 300);
-
-      // Should NOT contain the phrase about reading files directly
-      expect(orchestratorPrompt).not.toContain("reading modified files yourself");
-      // Should still mention reviewer dispatch
-      expect(orchestratorPrompt).toContain("dispatch reviewer");
-    });
-  });
-
   describe("2. MAJOR - fabric detection (correct package name)", () => {
     it("should use correct pi-fabric package name in source", () => {
       const indexPath = join(import.meta.dirname || ".", "..", "src", "index.ts");

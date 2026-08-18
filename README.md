@@ -33,7 +33,6 @@ Most multi-agent tools spawn a child and wait for completion. pi-subagents is a 
   - [get_subagent_result](#get_subagent_result)
   - [steer_subagent](#steer_subagent)
 - [Bundled Agent Types](#bundled-agent-types)
-  - [orchestrator](#orchestrator)
 - [Custom Agents](#custom-agents)
 - [UI & Commands](#ui--commands)
   - [Live Widget](#live-widget)
@@ -457,54 +456,19 @@ Choose models based on workload, not by vendor name. Use this tiered language:
 
 - **Cheap:** Extraction, search, fast reconnaissance, grunt work (e.g., Explore reading files, simple grep tasks).
 - **Mid:** Bounded implementation, planning, review with clear scope (e.g., worker implementing a small feature, Plan designing a refactor).
-- **Strongest available:** Ambiguous design decisions, high-stakes review, complex reasoning (e.g., orchestrator deciding workflow direction, reviewer on critical security code).
+- **Strongest available:** Ambiguous design decisions, high-stakes review, complex reasoning (e.g., oracle resolving an architectural trade-off, reviewer on critical security code).
 
 Concrete model defaults for built-in agents are listed in the agent descriptions below (e.g., "Explore is preset to haiku"), but tier routing is workload-driven: dispatch the right agent type for your task, then optionally override the model if you need more or fewer resources.
 
-### Orchestrator Role: Active Supervision
+### Coordinating Multi-Agent Work
 
-The **orchestrator** agent type is unique: it focuses on active supervision methodology, not just task execution.
-
-When using the orchestrator, follow this loop:
+The dispatching agent (the main session or any parent) acts as coordinator. Follow this loop:
 
 1. **Dispatch** agents with complete, self-contained briefs. Set expectations for what success looks like.
-2. **Monitor** running background agents via periodic `get_subagent_result()` calls. Capture progress and blockers.
+2. **Monitor** running background agents via `get_subagent_result()`. Capture progress and blockers, but do not poll healthy workers.
 3. **Steer** drift early using `steer_subagent()` when you discover new constraints or misunderstandings.
 4. **Review** work before accepting it. Dispatch a `reviewer` to verify diffs, not yourself.
 5. **Iterate** with follow-up workers on review findings. Never fire-and-forget.
-
-Example orchestrator loop:
-```typescript
-// Dispatch implementation
-const workerId = (await Agent({
-  subagent_type: "worker",
-  description: "Refactor module",
-  prompt: "Refactor src/auth.ts according to the plan...",
-  files: ["src/auth.ts"],
-  run_in_background: true,  // Background so we can monitor
-})).details.agentId
-
-// Monitor progress
-await new Promise(resolve => {
-  const checkLoop = setInterval(async () => {
-    const status = await get_subagent_result({ agent_id: workerId })
-    if (status.includes("still running")) {
-      console.log("Still working...")
-    } else {
-      clearInterval(checkLoop)
-      resolve(status)
-    }
-  }, 5000)  // Check every 5 seconds
-})
-
-// Review the result before accepting
-const review = await Agent({
-  subagent_type: "reviewer",
-  description: "Review refactor",
-  prompt: `Review this refactoring for correctness and fit...`,
-  run_in_background: false,
-})
-```
 
 For detailed coordination guidance, see `~/.pi/agent/AGENTS.md` (created on install). That file contains workflow examples, brief scaffolds, and skill reference patterns.
 
@@ -631,19 +595,6 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 **Output:** A direct recommendation with reasoning, key trade-offs, risks or blind spots the caller may have missed, and (when relevant) contradictions or drift from the decisions stated in the brief.  
 **Use when:** You need a strong second opinion, an expert consultation, or a hard call sanity-checked against a brief you compile.
 
-### orchestrator
-
-**Role:** Active supervision: dispatch with complete briefs, monitor, steer, review, iterate.
-
-**Tools:** bash only  
-**Model:** anthropic/claude-fable-5 (fixed)  
-**Thinking:** low  
-**Prompt:** Standalone (active supervision system prompt)  
-**Max turns:** 40  
-**Features:** No file modification tools. Dispatches all work to specialized subagents (Explore, worker, reviewer, etc.). Steers drift with `steer_subagent()`. Reviews work via reviewer dispatch (not direct inspection). Does not inspect code itself; all facts come from subagent reports.  
-**Notification-first supervision:** (1) Dispatch with complete briefs and expectations, (2) let background agents run and wait for completion notifications rather than polling healthy workers, (3) check progress only when the user asks, a dependency is overdue, another result invalidates a worker's premise, or you need to steer before it finishes, (4) review results via reviewer dispatch, (5) iterate with follow-up workers. Every progress poll reinjects the noise delegation was meant to remove.  
-**Use when:** Orchestrating complex multi-step workflows with many independent units. Orchestrator plans, dispatches, oversees, and reviews via subagents, never doing direct work.
-
 **Comparison table:**
 
 | Type              | Tools           | Model           | Locked | Depth | Context | Max turns | Use                                |
@@ -654,7 +605,6 @@ pi-subagents ships with seven built-in agent types, covering common workflow pat
 | worker            | All 7           | Inherit parent  | No     | 2     | No      | -         | Code implementation                |
 | reviewer          | All 7 (ro)      | Inherit parent  | No     | 1     | No      | 30        | Code review & validation           |
 | oracle            | Read-only (5)   | Inherit parent  | No     | 1     | No      | 30        | Second-opinion consultant          |
-| orchestrator      | bash only       | claude-fable-5  | Yes    | 1     | No      | 40        | Active supervision & orchestration  |
 
 **Managing defaults:**
 
@@ -863,7 +813,7 @@ Unified list with source indicators:
 - `graceTurns` (default 8): Extra turns allowed after wrap-up warning
 - `defaultJoinMode` (default `smart`): Notification strategy for background completions (`async`, `group`, `smart`)
 - `schedulingEnabled` (default true): Master switch for `/Agent.schedule` parameter
-- `disableDefaultAgents` (default false): Skip all bundled agents (general-purpose, Explore, Plan, worker, reviewer, oracle, orchestrator)
+- `disableDefaultAgents` (default false): Skip all bundled agents (general-purpose, Explore, Plan, worker, reviewer, oracle)
 - `toolDescriptionMode` (default `compact`): LLM description of Agent tool (`full`, `compact`, `custom`)
 - `defaultExtensions` (default all): Default extension allowlist for agents that omit `extensions:`
 
@@ -1509,7 +1459,7 @@ When **pi-intercom** is installed, **background child agents** automatically get
 - **Extension availability:** pi-intercom must survive the agent's extension filtering to be available. If the child's manifest excludes it, the tool will not be registered.
 - **Graceful fallback:** If pi-intercom is not installed, the env vars are inert, no error, no tool, completely invisible.
 
-**Use case:** Let background child agents ask questions or escalate decisions without waiting for the parent to poll results. Especially useful in `orchestrator` agents that delegate work and want live feedback.
+**Use case:** Let background child agents ask questions or escalate decisions without waiting for the parent to poll results. Especially useful for coordinating agents that delegate work and want live feedback.
 
 ### Output Transcripts
 
@@ -1544,7 +1494,7 @@ Settings persist across pi sessions and are merged from two sources:
 | `graceTurns`            | number                   | 8        | Extra turns allowed after wrap-up warning                                    |
 | `defaultJoinMode`       | `"async"` \| `"group"` \| `"smart"` | `"smart"` | Background agent completion notification strategy  |
 | `schedulingEnabled`     | boolean                  | true     | Master switch for schedule parameter and scheduler                           |
-| `disableDefaultAgents`  | boolean                  | false    | Skip all bundled agents (general-purpose, Explore, Plan, worker, reviewer, oracle, orchestrator)              |
+| `disableDefaultAgents`  | boolean                  | false    | Skip all bundled agents (general-purpose, Explore, Plan, worker, reviewer, oracle)              |
 | `toolDescriptionMode`   | `"full"` \| `"compact"` \| `"custom"` | `"compact"` | LLM description of Agent tool                          |
 | `defaultExtensions`     | boolean \| string[]      | omitted  | Default extension allowlist for agents that omit `extensions:` field        |
 | `defaultSkills`         | boolean \| string[]      | omitted  | Default skills for agents that omit `skills:`. Omitted here too = inherit all (`true`).                                             |

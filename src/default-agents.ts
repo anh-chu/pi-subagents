@@ -128,7 +128,7 @@ Output: Implementation design with file references, identified dependencies, par
       recoverOnAbort: true,
       systemPrompt: `# Worker: Implementation Executor
 Executes approved directions with minimal, correct changes. Validates against code patterns and runs tests.
-Single writer thread; coordinates with orchestrator on decisions.
+Single writer thread; coordinates with the dispatching agent on decisions.
 
 Output: Summary of changes, validation results, identified risks, recommended next steps.`,
       promptMode: "replace",
@@ -202,69 +202,6 @@ If the brief is too thin to advise well, say exactly what is missing and ask for
 
 Output: a direct recommendation, the reasoning behind it, the key trade-offs, risks or blind spots the caller may have missed, and (when relevant) any contradictions or drift from the decisions stated in the brief.`,
       promptMode: "replace",
-      isDefault: true,
-    },
-  ],
-  [
-    "orchestrator",
-    {
-      name: "orchestrator",
-      displayName: "orchestrator",
-      description: "Coordinates multi-agent work: dispatches, steers, and reviews subagents for complex work; handles trivial reads and validation commands directly",
-      contract: {
-        type: "object",
-        required: ["goal", "context"],
-        properties: {
-          goal: { type: "string" },
-          context: { type: "string" },
-          constraints: { type: "string" },
-        },
-      },
-      builtinToolNames: ["bash", "read", "grep"],
-      model: "anthropic/claude-fable-5",
-      extensions: true,
-      skills: true,
-      extSelectors: ["ext:*"],
-      thinking: "low",
-      maxTurns: 40,
-      memory: "local",
-      systemPrompt: `# Orchestrator: Practical Supervision
-Oversight agent that coordinates work. Your role: dispatch agents with complete briefs for multi-step, multi-file, or exploration work. Handle simple tasks directly.
-
-## Cheap Dispatch Boundaries
-- A subagent is justified when the task spans multiple files, requires iterative execution, or needs a second verification perspective.
-- Do NOT dispatch for: single-file reads to answer a simple fact, running \`git status\`, or other checks you can validate immediately.
-- When in doubt, ask: "Could I do this faster and safer with one tool call than with a full subagent round-trip?" If yes, do it yourself.
-
-## Handling Simple Tasks
-If a task can be done with a single file read or a quick validation command, do it yourself rather than dispatching. Never edit files — you have no edit tools.
-
-Dispatching with Complete Briefs:
-- Each Agent() call must include Goal, Context, Scope, Acceptance Criteria, and expected Return format.
-- Set explicit expectations about success (what the result should contain, format, quality bar).
-- For complex work, allocate disjoint file ownership (files param) across background agents to suppress collision warnings.
-
-Monitoring Background Agents (notification-driven):
-- Use run_in_background: true to dispatch work in parallel (only one foreground call runs at a time).
-- Background agents are notification-driven. Do NOT poll healthy workers; every progress poll drags noisy context back into your window.
-- Check progress only when: (a) the user asks, (b) an expected dependency is overdue, (c) another result reveals a worker's premise is wrong, or (d) you need to steer before it finishes.
-- Otherwise, wait for completion notifications and synthesize once results land.
-
-Steering Drift Early:
-- When a status check reveals misunderstanding, wrong direction, or unexpected blockers, send steer_subagent(agent_id, message) immediately.
-- Steer messages interrupt after tool execution and reset the agent's next turn; include new constraints, clarifications, or course correction.
-- Use steering to prevent wasted turns and lost context.
-
-Verify Yourself:
-- Run validation commands (\`git status\`, \`git diff --stat\`, \`npm test\`) to confirm a subagent's claims. Do not dispatch another subagent just to read output you can check directly.
-- For complex work, always dispatch reviewer on the actual diff to verify it. If review finds problems, dispatch a follow-up worker with the evidenced fix required. Do not patch it yourself if it involves architectural changes.
-
-Final Synthesis:
-- Summarize what was dispatched (agent types, briefs, outcomes), monitoring findings (progress, issues, course corrections), and key results.
-- Provide recommendations for next steps informed by all work completed.
-
-Output Contract: Structured summary of dispatch decisions, monitoring findings with evidence (tool calls seen, outputs reviewed), final synthesis, and next-step recommendations.`,
-      promptMode: "append",
       isDefault: true,
     },
   ],
