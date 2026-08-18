@@ -1,0 +1,626 @@
+{
+  "schemaVersion": 1,
+  "path": ".scratch/scratch-1786649657789-aa7faf.md",
+  "revision": 0,
+  "createdAt": "2026-08-13T19:34:20.774Z",
+  "updatedAt": "2026-08-13T19:34:20.774Z",
+  "refMap": {
+    "b55552a": {
+      "textHash": "55552a63285b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bd8839d": {
+      "textHash": "d8839d6f090d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b263970": {
+      "textHash": "2639707fddf2",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b6e2e5c": {
+      "textHash": "6e2e5c033d67",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b90b89b": {
+      "textHash": "90b89bc984a2",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b51e7d4": {
+      "textHash": "51e7d44ea8da",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bd237e8": {
+      "textHash": "d237e8d7748e",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4a99c9": {
+      "textHash": "4a99c9c9c4ba",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b1c23f3": {
+      "textHash": "1c23f384007b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bdd526f": {
+      "textHash": "dd526f44a742",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b573025": {
+      "textHash": "573025fbf353",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b1ed33b": {
+      "textHash": "1ed33ba54529",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b8a9d61": {
+      "textHash": "8a9d61277dfb",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b9dcea4": {
+      "textHash": "9dcea4d4a3ea",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "be6f729": {
+      "textHash": "e6f729ac7ebe",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b61f0e1": {
+      "textHash": "61f0e15c172f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b6c5cb5": {
+      "textHash": "6c5cb5deefc7",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb878d": {
+      "textHash": "cb878d685f71",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bb34dc1": {
+      "textHash": "b34dc1ac2d9d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bf717f6": {
+      "textHash": "f717f6a57c5b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b6bb7e0": {
+      "textHash": "6bb7e0acbc9d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "be0d544": {
+      "textHash": "e0d544f77a89",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b29ada6": {
+      "textHash": "29ada615d48e",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b31daba": {
+      "textHash": "31daba000651",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b12ab0f": {
+      "textHash": "12ab0fa6da82",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b049605": {
+      "textHash": "04960545968d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bd05ed5": {
+      "textHash": "d05ed5c59b39",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4e7014": {
+      "textHash": "4e701426fc42",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b3a0969": {
+      "textHash": "3a0969e14d65",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bf23e11": {
+      "textHash": "f23e11958eb5",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b24c90a": {
+      "textHash": "24c90a978904",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b5d34ab": {
+      "textHash": "5d34ab1ef3ea",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_33": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b8938d5": {
+      "textHash": "8938d5884dd3",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b7337f3": {
+      "textHash": "7337f3d0aa29",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b630b93": {
+      "textHash": "630b9390304a",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_37": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b7b5e4e": {
+      "textHash": "7b5e4e2286e0",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bd750cb": {
+      "textHash": "d750cb8a1d5e",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bb47834": {
+      "textHash": "b4783489f09c",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bc5671b": {
+      "textHash": "c5671b70a957",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b1b7ab1": {
+      "textHash": "1b7ab1efa608",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b26a616": {
+      "textHash": "26a61604644e",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b1bbd50": {
+      "textHash": "1bbd50079a6e",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b9c8abb": {
+      "textHash": "9c8abb696169",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b06c98c": {
+      "textHash": "06c98cb2e16c",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b274227": {
+      "textHash": "274227889493",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b11be37": {
+      "textHash": "11be370f1567",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b3a5843": {
+      "textHash": "3a584320dabc",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "ba13996": {
+      "textHash": "a13996914944",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4e1cd7": {
+      "textHash": "4e1cd7ac35e4",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b064063": {
+      "textHash": "0640638e46af",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_53": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bdd1c46": {
+      "textHash": "dd1c465d748b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b62a209": {
+      "textHash": "62a209180073",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bb47834_56": {
+      "textHash": "b4783489f09c",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bc3fb47": {
+      "textHash": "c3fb4733cc9b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "baf55bc": {
+      "textHash": "af55bce72762",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b95f5e2": {
+      "textHash": "95f5e24719a2",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bf0aadb": {
+      "textHash": "f0aadb7aff62",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bf552a1": {
+      "textHash": "f552a1e79bdc",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4552a5": {
+      "textHash": "4552a5c32a24",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bebbd57": {
+      "textHash": "ebbd57bc60cd",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b56b4b7": {
+      "textHash": "56b4b7ccdfdf",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "badcfc7": {
+      "textHash": "adcfc79c1a09",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b987928": {
+      "textHash": "987928a37f7b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b5ed21b": {
+      "textHash": "5ed21b168dee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bdc9b23": {
+      "textHash": "dc9b2315af6b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b7c2f2e": {
+      "textHash": "7c2f2ea7f6d4",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b7abad8": {
+      "textHash": "7abad8ad164d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bfdd64e": {
+      "textHash": "fdd64ea7e39f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b54ecfc": {
+      "textHash": "54ecfc887ae4",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b3a5843_73": {
+      "textHash": "3a584320dabc",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b746a6e": {
+      "textHash": "746a6e6ecffb",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4e1cd7_75": {
+      "textHash": "4e1cd7ac35e4",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b0831fe": {
+      "textHash": "0831fe5e22ec",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_77": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4a638d": {
+      "textHash": "4a638db4116b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b5b6e3d": {
+      "textHash": "5b6e3d829156",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b827bec": {
+      "textHash": "827bec0541c4",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47a872": {
+      "textHash": "47a87294bf41",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b1d358b": {
+      "textHash": "1d358bb5034e",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b45f276": {
+      "textHash": "45f2765ba469",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bd309d2": {
+      "textHash": "d309d2c6663f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b8ce887": {
+      "textHash": "8ce88776e698",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b2401cf": {
+      "textHash": "2401cfffda08",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4650f4": {
+      "textHash": "4650f4269a0f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bf3f193": {
+      "textHash": "f3f19392503d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47c776": {
+      "textHash": "47c776eb78cb",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b74e0ae": {
+      "textHash": "74e0aef57e2d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bef9aed": {
+      "textHash": "ef9aed29aeac",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47a872_92": {
+      "textHash": "47a87294bf41",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bdf33ca": {
+      "textHash": "df33ca8b996f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b45f276_94": {
+      "textHash": "45f2765ba469",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b71d7d7": {
+      "textHash": "71d7d7b6ac80",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47c776_96": {
+      "textHash": "47c776eb78cb",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bf357d3": {
+      "textHash": "f357d33bd910",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b939f96": {
+      "textHash": "939f962efd0b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b1b9df9": {
+      "textHash": "1b9df98f8fae",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_100": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b9d2736": {
+      "textHash": "9d2736394ae0",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b9d8d32": {
+      "textHash": "9d8d3248556a",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b827bec_103": {
+      "textHash": "827bec0541c4",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47a872_104": {
+      "textHash": "47a87294bf41",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b14465c": {
+      "textHash": "14465c8fef67",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b45f276_106": {
+      "textHash": "45f2765ba469",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b5936e1": {
+      "textHash": "5936e11bed46",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47c776_108": {
+      "textHash": "47c776eb78cb",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b03ea3b": {
+      "textHash": "03ea3bb865ec",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bef9aed_110": {
+      "textHash": "ef9aed29aeac",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47a872_111": {
+      "textHash": "47a87294bf41",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bfd9031": {
+      "textHash": "fd9031dddf45",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b45f276_113": {
+      "textHash": "45f2765ba469",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bb2e4e5": {
+      "textHash": "b2e4e579bfd8",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b47c776_115": {
+      "textHash": "47c776eb78cb",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb93ff": {
+      "textHash": "cb93ff6497e9",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_117": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b5ad010": {
+      "textHash": "5ad010031ec5",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b3ffae0": {
+      "textHash": "3ffae0a8fdbf",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bf8bded": {
+      "textHash": "f8bded9b290e",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b85d14e": {
+      "textHash": "85d14e657566",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "be71da1": {
+      "textHash": "e71da1a21f40",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bc8d369": {
+      "textHash": "c8d36933e2d9",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b13cb51": {
+      "textHash": "13cb51506a36",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b65ed0b": {
+      "textHash": "65ed0bdfae12",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "be6bde2": {
+      "textHash": "e6bde2018cff",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcd95a6": {
+      "textHash": "cd95a6747901",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bc42259": {
+      "textHash": "c42259dc7c39",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "ba45b28": {
+      "textHash": "a45b28762e49",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b4f2d1f": {
+      "textHash": "4f2d1ff52870",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_131": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b5e3661": {
+      "textHash": "5e36619b134f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b103f61": {
+      "textHash": "103f6161ff55",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bee0893": {
+      "textHash": "ee0893b49d8d",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b73d568": {
+      "textHash": "73d5686d4b99",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bb9f988": {
+      "textHash": "b9f9885b5981",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b5d5c85": {
+      "textHash": "5d5c8580e4e9",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b3b39d0": {
+      "textHash": "3b39d09443c8",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_139": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b8b6667": {
+      "textHash": "8b6667fc6cd2",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b62a670": {
+      "textHash": "62a67093a7dc",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bee7865": {
+      "textHash": "ee7865a062f6",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bdc3eb2": {
+      "textHash": "dc3eb2573e8f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bd8d774": {
+      "textHash": "d8d77466a4c9",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "ba214e1": {
+      "textHash": "a214e1622bc2",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bb52369": {
+      "textHash": "b5236905eb9c",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "bcb3f91_147": {
+      "textHash": "cb3f91d54eee",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b997c85": {
+      "textHash": "997c85aee872",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b93dde4": {
+      "textHash": "93dde432587c",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "ba076dd": {
+      "textHash": "a076dd58eb8b",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    },
+    "b3d9dc8": {
+      "textHash": "3d9dc875231f",
+      "lastSeenAt": "2026-08-13T19:34:21.154Z"
+    }
+  },
+  "refAliases": {},
+  "comments": [],
+  "suggestions": [],
+  "archivedSuggestions": [],
+  "events": [],
+  "nextEventId": 1,
+  "lastAck": {},
+  "fingerprint": "sha256:8cb33ff34e3e6b380ba05d5992ba9305acd3fcc02abc51d4fe6eabca95a6bf7e",
+  "blockProvenance": {}
+}
