@@ -16,6 +16,15 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       name: "general-purpose",
       displayName: "Agent",
       description: "General-purpose agent for complex, multi-step tasks",
+      contract: {
+        type: "object",
+        required: ["goal"],
+        properties: {
+          goal: { type: "string" },
+          context: { type: "string" },
+          return_format: { type: "string" },
+        },
+      },
       // builtinToolNames omitted — means "all available tools" (resolved at lookup time)
       // inheritContext / runInBackground / isolated omitted — strategy fields, callers decide per-call.
       // Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
@@ -33,6 +42,15 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       name: "Explore",
       displayName: "Explore",
       description: "Narrow, targeted codebase lookups only (read-only). Use for finding files, tracing code paths, and locating symbols. Do NOT use for broad audits, bug replication, or behavior verification (use worker or general-purpose for those). Split broad exploration into multiple scoped parallel calls",
+      contract: {
+        type: "object",
+        required: ["goal", "scope"],
+        properties: {
+          goal: { type: "string" },
+          scope: { type: "string" },
+          return_format: { type: "string" },
+        },
+      },
       builtinToolNames: READ_ONLY_TOOLS,
       extensions: true,
       skills: true,
@@ -55,6 +73,15 @@ Output: Absolute file paths with line:col citations. Quote minimal snippets to s
       name: "Plan",
       displayName: "Plan",
       description: "Complex multi-step implementation planning after Explore, never simple or one-file tasks (read-only)",
+      contract: {
+        type: "object",
+        required: ["goal", "context"],
+        properties: {
+          goal: { type: "string" },
+          context: { type: "string" },
+          constraints: { type: "string" },
+        },
+      },
       builtinToolNames: READ_ONLY_TOOLS,
       extensions: true,
       skills: true,
@@ -76,6 +103,20 @@ Output: Implementation design with file references, identified dependencies, par
       name: "worker",
       displayName: "worker",
       description: "Implementation agent for scoped code edits, bug fixes, bug replication, and feature implementation. Uses tools to write and modify code.",
+      contract: {
+        type: "object",
+        required: ["goal", "context", "scope", "acceptance"],
+        properties: {
+          goal: { type: "string" },
+          context: { type: "string" },
+          scope: {
+            type: "object",
+            required: ["includes"],
+            properties: { includes: { type: "array", items: { type: "string" } } },
+          },
+          acceptance: { type: "array", items: { type: "string" } },
+        },
+      },
       builtinToolNames: WRITE_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
@@ -100,6 +141,16 @@ Output: Summary of changes, validation results, identified risks, recommended ne
       name: "reviewer",
       displayName: "reviewer",
       description: "Review specialist for code diffs, plans, and proposed solutions. Verifies changes against requirements and produces evidence-based findings. NOT for open-ended debates, brainstorming, architecture discussions, or general reasoning (use oracle or main agent instead).",
+      contract: {
+        type: "object",
+        required: ["goal", "context", "scope"],
+        properties: {
+          goal: { type: "string" },
+          context: { type: "string" },
+          scope: { type: "string" },
+          acceptance: { type: "array", items: { type: "string" } },
+        },
+      },
       builtinToolNames: READ_ONLY_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
@@ -127,6 +178,15 @@ PASS = criteria met and verified. FAIL = a criterion is unmet or a regression fo
       name: "oracle",
       displayName: "oracle",
       description: "Expensive, high-capability agent for second opinions, hard judgment calls, and consultation. Works from a curated brief, not the full transcript.",
+      contract: {
+        type: "object",
+        required: ["question", "context"],
+        properties: {
+          question: { type: "string" },
+          context: { type: "string" },
+          options_considered: { type: "array", items: { type: "string" } },
+        },
+      },
       builtinToolNames: READ_ONLY_TOOLS,
       // model omitted — inherit parent model.
       extensions: true,
@@ -151,6 +211,15 @@ Output: a direct recommendation, the reasoning behind it, the key trade-offs, ri
       name: "orchestrator",
       displayName: "orchestrator",
       description: "Coordinates multi-agent work: dispatches, steers, and reviews subagents for complex work; handles trivial reads and validation commands directly",
+      contract: {
+        type: "object",
+        required: ["goal", "context"],
+        properties: {
+          goal: { type: "string" },
+          context: { type: "string" },
+          constraints: { type: "string" },
+        },
+      },
       builtinToolNames: ["bash", "read", "grep"],
       model: "anthropic/claude-fable-5",
       extensions: true,

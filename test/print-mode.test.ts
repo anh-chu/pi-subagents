@@ -89,6 +89,7 @@ describe("print mode background notifications", () => {
         prompt: "reply done",
         description: "tiny child",
         subagent_type: "general-purpose",
+        request: { goal: "reply done" },
         run_in_background: true,
       },
       undefined,
