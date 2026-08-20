@@ -24,7 +24,7 @@ import { BUILTIN_TOOL_NAMES, getAgentConfig, getConfig, getMemoryToolNames, getR
 import { buildParentContext, extractText, seedForkedSessionManager } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
-import { applySubagentBridgeEnv, snapshotIntercomSessionId, withIntercomBridgeLock } from "./intercom-bridge.js";
+import { applySubagentBridgeEnv, isolateChildIntercomStableId, snapshotIntercomSessionId, withIntercomBridgeLock } from "./intercom-bridge.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { type PreloadedSkill, preloadSkills } from "./skill-loader.js";
@@ -797,10 +797,14 @@ export async function runAgent(
   // The pi-intercom bridge lock also covers this window: the child's intercom
   // session_start overwrites PI_INTERCOM_SESSION_ID with the child's broker id,
   // and we restore the orchestrator's value afterward so sibling spawns still
-  // resolve the orchestrator. No new PI_SUBAGENT_* env is needed here.
+  // resolve the orchestrator. We also strip any inherited PI_INTERCOM_STABLE_ID
+  // for this window so the child registers under its own unique broker id rather
+  // than the parent's stable identity (which would collide on the broker and
+  // cross-route messages between sessions). No new PI_SUBAGENT_* env is needed here.
   try {
     await withIntercomBridgeLock(async () => {
       const restoreIntercom = snapshotIntercomSessionId();
+      const restoreStableId = isolateChildIntercomStableId();
       try {
         await session.bindExtensions({
           onError: (err) => {
@@ -811,6 +815,7 @@ export async function runAgent(
           },
         });
       } finally {
+        restoreStableId();
         restoreIntercom();
       }
     });

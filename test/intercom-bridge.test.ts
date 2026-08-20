@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applySubagentBridgeEnv,
+  isolateChildIntercomStableId,
   snapshotIntercomSessionId,
   withIntercomBridgeLock,
 } from "../src/intercom-bridge.js";
@@ -14,7 +15,7 @@ const BRIDGE_KEYS = [
   "PI_SUBAGENT_INTERCOM_SESSION_NAME",
 ] as const;
 
-const ALL_KEYS = [...BRIDGE_KEYS, "PI_INTERCOM_SESSION_ID"] as const;
+const ALL_KEYS = [...BRIDGE_KEYS, "PI_INTERCOM_SESSION_ID", "PI_INTERCOM_STABLE_ID"] as const;
 
 function snapshotAll(): Record<string, string | undefined> {
   const snap: Record<string, string | undefined> = {};
@@ -118,6 +119,36 @@ describe("snapshotIntercomSessionId", () => {
       process.env.PI_INTERCOM_SESSION_ID = "child-only";
       restore();
       expect(process.env.PI_INTERCOM_SESSION_ID).toBeUndefined();
+    } finally {
+      restore(snap);
+    }
+  });
+});
+
+describe("isolateChildIntercomStableId", () => {
+  it("removes an inherited stable id during the child bind window and restores it", () => {
+    const snap = snapshotAll();
+    try {
+      process.env.PI_INTERCOM_STABLE_ID = "parent-stable-id";
+      const restore = isolateChildIntercomStableId();
+      // During bind, the child must not see the parent's stable id, so it
+      // registers under its own session id instead of hijacking the parent's.
+      expect(process.env.PI_INTERCOM_STABLE_ID).toBeUndefined();
+      restore();
+      expect(process.env.PI_INTERCOM_STABLE_ID).toBe("parent-stable-id");
+    } finally {
+      restore(snap);
+    }
+  });
+
+  it("is a no-op when no stable id is configured", () => {
+    const snap = snapshotAll();
+    try {
+      delete process.env.PI_INTERCOM_STABLE_ID;
+      const restore = isolateChildIntercomStableId();
+      expect(process.env.PI_INTERCOM_STABLE_ID).toBeUndefined();
+      restore();
+      expect(process.env.PI_INTERCOM_STABLE_ID).toBeUndefined();
     } finally {
       restore(snap);
     }

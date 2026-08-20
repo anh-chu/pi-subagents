@@ -22,6 +22,14 @@
  *    `PI_INTERCOM_SESSION_ID` with the child's own broker id. We snapshot/restore
  *    it around bindExtensions so the orchestrator-side intercom runtime keeps a
  *    stable view of its own id across spawns.
+ *  - The child runs in the parent's OS process and inherits its `process.env`,
+ *    including `PI_INTERCOM_STABLE_ID`. pi-intercom derives the child's broker
+ *    registration id as `PI_INTERCOM_STABLE_ID || config.stableId || sessionId`
+ *    (intercom index.ts:434), so an inherited stable id makes the child register
+ *    under the PARENT's identity — a broker-identity collision that cross-routes
+ *    traffic between sessions. We remove `PI_INTERCOM_STABLE_ID` for the child's
+ *    bind window so each child registers under its own unique in-memory id.
+ *    No-op when no stable id is configured.
  *
  * When pi-intercom is not installed, the PI_SUBAGENT_* env is emitted but nothing
  * reads it — harmless. Children behave as plain ephemeral subagents and any
@@ -42,6 +50,7 @@ const SUBAGENT_BRIDGE_KEYS = [
 ] as const;
 
 const INTERCOM_SESSION_ID_ENV = "PI_INTERCOM_SESSION_ID";
+const INTERCOM_STABLE_ID_ENV = "PI_INTERCOM_STABLE_ID";
 
 let bridgeChain: Promise<unknown> = Promise.resolve();
 
@@ -109,5 +118,23 @@ export function snapshotIntercomSessionId(): () => void {
   return () => {
     if (prev === undefined) delete process.env[INTERCOM_SESSION_ID_ENV];
     else process.env[INTERCOM_SESSION_ID_ENV] = prev;
+  };
+}
+
+/**
+ * Remove an inherited `PI_INTERCOM_STABLE_ID` for the child's bind window so the
+ * child's intercom `session_start` cannot register under the parent's stable
+ * broker identity. Without this, a child running in the parent's process adopts
+ * the parent's stable id and collides with it on the broker, cross-routing
+ * messages between sessions. Snapshot before `session.bindExtensions()` (inside
+ * the bridge lock, alongside `snapshotIntercomSessionId`); invoke the returned
+ * restore after bind resolves. No-op when the var is absent.
+ */
+export function isolateChildIntercomStableId(): () => void {
+  const prev = process.env[INTERCOM_STABLE_ID_ENV];
+  if (prev !== undefined) delete process.env[INTERCOM_STABLE_ID_ENV];
+  return () => {
+    if (prev === undefined) delete process.env[INTERCOM_STABLE_ID_ENV];
+    else process.env[INTERCOM_STABLE_ID_ENV] = prev;
   };
 }
