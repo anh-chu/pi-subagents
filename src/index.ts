@@ -827,7 +827,7 @@ Hard invariants:
 - Verify agent output before accepting as done; review diffs rather than trusting claims.
 
 Coordination:
-- For parallel work, use run_in_background: true on each agent. Foreground calls run sequentially — only one executes at a time.
+- Agents always run in the background and return an agent ID immediately; blocking synchronous dispatch is deprecated. Dispatch parallel agents in one message, then collect results with get_subagent_result.
 - Use resume with an agent ID to continue a previous agent's work.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Coordinator loop: dispatch agents, read results, synthesize, then dispatch next agents informed by findings.
@@ -967,7 +967,7 @@ Notes:
       ),
       run_in_background: Type.Optional(
         Type.Boolean({
-          description: "Run in background. Returns agent ID immediately. Default: true.",
+          description: "Deprecated and ignored: subagents always run in the background and return an agent ID immediately. Blocking synchronous execution has been removed.",
         }),
       ),
       resume: Type.Optional(
@@ -1140,6 +1140,14 @@ Notes:
 
       const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
 
+      // Blocking synchronous subagents are deprecated. Warn when a caller still
+      // asks for the foreground so the ignored request is discoverable.
+      const foregroundRequested =
+        params.run_in_background === false || customConfig?.runInBackground === false;
+      const deprecationNote = foregroundRequested
+        ? "Note: blocking synchronous subagents are deprecated; running in the background instead.\n"
+        : "";
+
       // Resolve model from agent config first; tool-call params only fill gaps.
       let model = ctx.model;
       if (resolvedConfig.modelInput) {
@@ -1198,9 +1206,6 @@ Notes:
         }
         if (params.inherit_context || (params.context && params.context !== "fresh")) {
           return textResult("Cannot combine `schedule` with `inherit_context`/`context` — there is no parent conversation at fire time.");
-        }
-        if (params.run_in_background === false) {
-          return textResult("Cannot combine `schedule` with `run_in_background: false` — scheduled jobs always run in background.");
         }
         if (!scheduler.isActive()) {
           return textResult("Scheduler is not active in this session yet. Try again after the session has fully started.");
@@ -1327,6 +1332,7 @@ Notes:
 
         const isQueued = record?.status === "queued";
         return textResult(
+          deprecationNote +
           `Agent ${isQueued ? "queued" : "started"} in background.\n` +
           `Agent ID: ${id}\n` +
           `Type: ${displayName}\n` +
@@ -2355,7 +2361,7 @@ skills: <true (inherit all), false (none), or comma-separated skill names to pre
 disallowed_tools: <comma-separated tool names to block, even if otherwise available. Omit for none>
 inherit_context: <deprecated alias for context: transcript. Default: false>
 context: <"fresh" (none, default), "transcript" (lossy text projection of parent chat, drops tool results), or "fork" (structured replay of parent history incl. tool results/thinking)>
-run_in_background: <false to block until the agent finishes. Default: true>
+run_in_background: <deprecated and ignored: agents always run in the background>
 memory: <"user" (global), "project" (per-project), or "local" (gitignored per-project) for persistent memory. Omit for none>
 isolation: <"worktree" to run in isolated git worktree. Omit for normal>
 contract: <optional JSON Schema as inline JSON that validates the caller's structured request, e.g. {"type":"object","required":["goal"],"properties":{"goal":{"type":"string"}}}. A dispatch whose request fails the schema is rejected before spawn. Omit for no contract>

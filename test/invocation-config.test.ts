@@ -33,7 +33,7 @@ describe("resolveAgentInvocationConfig", () => {
         thinking: "minimal",
         max_turns: 1,
         inherit_context: true,
-        run_in_background: true,
+        run_in_background: false,
         isolation: "worktree",
       },
     );
@@ -43,7 +43,8 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.thinking).toBe("high");
     expect(resolved.maxTurns).toBe(42);
     expect(resolved.inheritContext).toBe(false);
-    expect(resolved.runInBackground).toBe(false);
+    // Deprecated: blocking synchronous subagents always resolve to background.
+    expect(resolved.runInBackground).toBe(true);
     expect(resolved.isolation).toBe("worktree");
   });
 

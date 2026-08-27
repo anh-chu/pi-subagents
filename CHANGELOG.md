@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`disableDefaultAgents` setting** ([#93](https://github.com/tintinweb/pi-subagents/pull/93)). When on, the three built-in default agents (general-purpose, Explore, Plan) are skipped at registration — only user-defined `.pi/agents/*.md` agents are advertised and spawnable. Off by default; toggle via `/agents → Settings` or `subagents.json`.
 - **`toolDescriptionMode` setting** ([#101](https://github.com/tintinweb/pi-subagents/pull/101)). Choose the Agent tool description sent to the LLM: `full` (rich, default), `compact` (~75% fewer tokens, for small/local models), or `custom` (`.pi/agent-tool-description.md` with `{{placeholder}}` substitution). See `examples/agent-tool-description.md`.
 
+### Deprecated
+
+- **Blocking synchronous subagents are deprecated; every dispatch now runs as a background async agent.** `run_in_background: false` (tool param) and `runInBackground: false` (agent frontmatter) are still accepted but ignored — the Agent tool always returns an agent ID immediately and never blocks the parent turn. When a caller explicitly requests the foreground, the result is prefixed with a deprecation note. Collect results with `get_subagent_result` as usual.
+
 ### Fixed
 
 - **Path entries in `extensions: [...]` now match only their resolved extension resource.** Bare names retain case-insensitive canonical-name matching. This prevents paths ending in shared directory names such as `src/index.ts` or `extensions/index.ts` from retaining unrelated extensions.

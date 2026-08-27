@@ -54,7 +54,11 @@ export function resolveAgentInvocationConfig(
     maxTurns: agentConfig?.maxTurns ?? params.max_turns,
     inheritContext: agentConfig?.inheritContext ?? params.inherit_context ?? false,
     contextMode: resolveContextMode(agentConfig, params),
-    runInBackground: agentConfig?.runInBackground ?? params.run_in_background ?? true,
+    // Blocking synchronous subagents are deprecated. Every dispatch now runs as
+    // a background async agent regardless of the `run_in_background` param or
+    // `runInBackground` config field; both are retained for compatibility but
+    // no longer switch execution to the foreground.
+    runInBackground: true,
     isolation: agentConfig?.isolation ?? params.isolation,
   };
 }
